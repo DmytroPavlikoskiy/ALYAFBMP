@@ -54,6 +54,20 @@
         }
       },
       {
+        "method": "GET",
+        "path": "/users/get_admin",
+        "description": "Вертає всіх адмінів",
+        "responses": {
+          "200": {
+            "id": "uuid",
+            "first_name": "string",
+            "is_banned": "boolean",
+            "banned_until": "iso_date",
+            "selected_categories": [1, 2, 3]
+          }
+        }
+      },
+      {
         "method": "POST",
         "path": "/users/me/preferences",
         "description": "Збереження категорій, обраних у модалці",
@@ -157,8 +171,14 @@
         "responses": { "200": [{ "chat_id": "uuid", "last_message": "string", "opponent": "string" }] }
       },
       {
+        "method": "GET",
+        "path": "/auth/get_ticket/",
+        "description": "",
+        "message_format": { "sender_id": "uuid", "text": "string", "sent_at": "iso_date" }
+      }
+      {
         "method": "WS",
-        "path": "/ws/chat/{chat_id}",
+        "path": "/ws/chat/{chat_id}/{ticket}",
         "description": "WebSocket для реалтайм спілкування",
         "message_format": { "sender_id": "uuid", "text": "string", "sent_at": "iso_date" }
       }
@@ -187,6 +207,7 @@
 Дитина 2: Збереження преференцій (preferences) у БД.
 
 Дитина 3: Реалізація Update профілю та завантаження аватарки.
+
 
 (Катя, Настя, Марта)
 Група 3: Smart Feed & Search
