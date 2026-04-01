@@ -3,7 +3,7 @@ from typing import List, Dict
 
 
 def get_smart_feed(all_products: Dict, user_preferences: List):
-    """Приймає продукти та вподобання юзера, сортує: спочатку уподобання(за часом), потім всі інші продукти"""
+    """Приймає продукти та впод get_smart_feedобання юзера, сортує: спочатку уподобання(за часом), потім всі інші продукти"""
     priority_products = []
     other_products = []
 
