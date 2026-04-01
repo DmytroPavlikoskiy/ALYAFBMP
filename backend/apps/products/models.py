@@ -17,6 +17,10 @@ class UserPreference(Base):
         primary_key=True
     )
 
+    def create(self, user_id, category_id):
+        pass
+
+
 
 
 class Category(Base):

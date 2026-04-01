@@ -1,8 +1,10 @@
-from fastapi import APIRouter, BackgroundTasks, FastAPI
+from fastapi import APIRouter, BackgroundTasks, FastAPI, Depends
 from typing import List
-from schemas import UserPref
+from apps.products.schemas import UserPref
+from apps.products.models import UserPreference
+from common.database import get_db
+import uuid
 
-app = FastAPI()
 router = APIRouter()
 
 @router.get("/categories")
@@ -17,10 +19,13 @@ async def choice_user_pref():
 
 user_prefs = []
 
-async def save_prefs():
-    for user_pref_id in user_prefs:
-        await UserPref.create(category_id=user_pref_id, user_id=user_id)
+async def save_prefs(user_id: uuid.UUID, category_ids: List[int]):
+    "Звертатись через db і сейвити в базу назі UserPreference"
+    # db = await get_db()
+    for user_pref_id in category_ids:
+        await UserPreference.create(category_id=user_pref_id, user_id=user_id)
     return user_prefs
+
 
 @app.post("/save-prefs")
 async def save_user_prefs(user_id: int, background_tasks: BackgroundTasks):
