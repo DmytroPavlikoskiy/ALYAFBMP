@@ -1,5 +1,6 @@
 from fastapi import APIRouter, BackgroundTasks, FastAPI
 from typing import List
+from schemas import UserPref
 
 app = FastAPI()
 router = APIRouter()
@@ -18,7 +19,7 @@ user_prefs = []
 
 async def save_prefs():
     for user_pref_id in user_prefs:
-        await UserPerf.create(category_id=user_pref_id, user_id=user_id)
+        await UserPref.create(category_id=user_pref_id, user_id=user_id)
     return user_prefs
 
 @app.post("/save-prefs")
