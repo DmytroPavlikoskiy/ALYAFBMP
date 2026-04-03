@@ -27,7 +27,6 @@ class UserPreference(Base):
 
 
 
-
 class Category(Base):
     __tablename__ = "categories"
 

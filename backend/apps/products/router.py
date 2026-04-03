@@ -1,9 +1,11 @@
-from fastapi import APIRouter, BackgroundTasks, FastAPI, Depends
-from typing import List
+from fastapi import APIRouter, BackgroundTasks, FastAPI, Depends, Query
+from typing import List, Optional
 from apps.products.schemas import UserPref
 from apps.products.models import UserPreference
 from common.database import get_db
 import uuid
+from pydantic import Field
+
 
 router = APIRouter()
 
@@ -34,6 +36,33 @@ async def save_user_prefs(user_id: int, background_tasks: BackgroundTasks):
     return{
         "message":"Параметри користувача зберігаються у фоні",
         "user_prefs": user_prefs
+    }
+
+
+@router.get("/get_products")
+async def get_product(
+    limit: int = Query(10, gt=0, le=100, description="Кількість товарів на сторінці"),
+    page: int = Query(1),
+    filter_date: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$", description="Дата у форматі YYYY-MM-DD"),
+    price: float = Query(None),
+
+):
+    "витягуємо дані продуктів, якщо перша сторінка page=1,"
+    "і limit=10: витягуємо перші 10 продуктів з 10 включно"
+    "Якщо page=2, limit=10, значить витягуємо з 10 по 20 включно продукт і тд..."
+    "Робимо перевірку чи нам прийшла filter_date, якщо filter_date є не = None то тоді,"
+    "ми не робимо пагінацію, а просто віддаємо продукти по даті"
+    "яка прийшла по полу created_at, поле created_at є істиною"
+
+    "Робиш перевірку чи price is not None, якщо price прийшов то робиш перевіряєш чи прийшла filter_date"
+    "Якщо прийшли і price і filter_date то ми перше фільтруємо по filter_date, а потім ті вітфільтровані дані фільтруємо по ціні"
+    "Якщо прийшов лише price то просто фільтруємо по ціні"
+    return {
+        "limit": limit,
+        "page": page,
+        "filter_date": filter_date,
+        "price": price if price is not None else None,
+        "product": []
     }
 
     
