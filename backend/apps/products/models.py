@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import List, Optional
 from sqlalchemy import String, ForeignKey
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from common.database import db
 
 class UserPreference(Base):
     __tablename__ = "user_preferences"
@@ -18,7 +19,11 @@ class UserPreference(Base):
     )
 
     def create(self, user_id, category_id):
-        pass
+        self.user_id = user_id
+        self.category_id = category_id
+        db.add(self)
+        db.commit()
+        return self
 
 
 
