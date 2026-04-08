@@ -4,6 +4,7 @@ from typing import List, Optional
 from sqlalchemy import String, ForeignKey, DateTime, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from common.database import Base
+from products.models import Category
 
 class User(Base):
     __tablename__ = "users"
