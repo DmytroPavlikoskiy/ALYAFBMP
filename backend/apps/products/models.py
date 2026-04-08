@@ -6,6 +6,7 @@ from sqlalchemy import String, ForeignKey
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from common.database import db
 
+
 class UserPreference(Base):
     __tablename__ = "user_preferences"
 

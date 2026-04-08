@@ -1,5 +1,5 @@
 from fastapi import APIRouter, BackgroundTasks, FastAPI, Depends, Query
-from typing import List, Optional
+from typing import List, Optional, Dict
 from apps.products.schemas import UserPref
 from apps.products.models import UserPreference
 from common.database import get_db
@@ -37,6 +37,22 @@ async def save_user_prefs(user_id: int, background_tasks: BackgroundTasks):
         "message":"Параметри користувача зберігаються у фоні",
         "user_prefs": user_prefs
     }
+
+
+def user_check_ban(user_id) -> bool:
+    "Дістаєш корисутвача або його uuid"
+    "BanList.filter(user_id=user_id).first()"
+    "Робиш перевірку якщо знайшовся по ід в бан лісті користувач,"
+    "то return False, якщо такого корстувача не знайдено тоді return True"
+
+
+@router.post("/create_product")
+async def create_product(prod_data: Dict, check_ban: bool = Depends(user_check_ban)):
+    if check_ban:
+        "Дозволяєш створбвати"
+    else:
+        "Кидаєш відповідь json з msg = Нажали ви не можете зараз створити проукт, ви забанені ще сткільки часу."
+    pass
 
 
 @router.get("/get_products")
