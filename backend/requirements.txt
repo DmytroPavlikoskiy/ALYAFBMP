@@ -9,6 +9,8 @@ sqlalchemy==2.0.28
 asyncpg==0.29.0
 black
 alembic==1.13.1
+sqladmin==0.18.0
+psycopg2-binary==2.9.9
 
 # --- Authentication (JWT) ---
 python-jose[cryptography]==3.3.0

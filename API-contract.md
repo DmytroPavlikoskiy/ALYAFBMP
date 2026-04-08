@@ -214,7 +214,7 @@
 Дитина 3: Система сповіщень (Notifications) у профілі клієнта.
 
 
-
+-
 Група 6: Orders & Real-time Chat
 Дитина 1: Створення замовлень (Orders) та історія покупок.
 
@@ -272,7 +272,7 @@ CREATE TABLE products (
     title VARCHAR(255) NOT NULL,
     description TEXT,
     price DECIMAL(12, 2) NOT NULL,
-    status VARCHAR(20) DEFAULT 'PENDING', -- 'PENDING', 'ACTIVE', 'REJECTED'
+    status VARCHAR(20) DEFAULT 'PENDING', -- 'APPROVE', 'PENDING', 'REJECTED'
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );

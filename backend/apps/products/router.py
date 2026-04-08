@@ -1,87 +1,167 @@
-from fastapi import APIRouter, BackgroundTasks, FastAPI, Depends, Query
-from typing import List, Optional, Dict
-from apps.products.schemas import UserPref
-from apps.products.models import UserPreference
-from common.database import get_db
-import uuid
-from pydantic import Field
+from __future__ import annotations
 
+import uuid
+
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+)
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from apps.products.schemas import (
+    CategoryOut,
+    FeedResponse,
+    LikeResponse,
+    ProductCreatedResponse,
+    ProductDetailResponse,
+)
+from apps.moderation.deps import verify_bot_secret
+from apps.products.services.feed import fetch_smart_feed
+from common.database import get_db
+from common.deps import get_current_user_id, get_current_user_id_optional
 
 router = APIRouter()
 
-@router.get("/categories")
-async def get_category():
-    cat = ""
-    return cat
 
-@router.post("/user/preferences")
-async def choice_user_pref():
-    user_pref = ""
-    return user_pref
+@router.get("/categories", response_model=list[CategoryOut])
+async def list_categories(db: AsyncSession = Depends(get_db)):
+    """
+    GET /api/v1/categories
 
-user_prefs = []
-
-async def save_prefs(user_id: uuid.UUID, category_ids: List[int]):
-    "Звертатись через db і сейвити в базу назі UserPreference"
-    # db = await get_db()
-    for user_pref_id in category_ids:
-        await UserPreference.create(category_id=user_pref_id, user_id=user_id)
-    return user_prefs
+    1. Виконай select(Category) через await session.execute(select(Category).order_by(Category.id)).
+    2. Поверни список CategoryOut (id, name, icon_url).
+    """
+    raise HTTPException(status_code=501, detail="Група 2: реалізуйте список категорій (SQLAlchemy 2.0 select).")
 
 
-@app.post("/save-prefs")
-async def save_user_prefs(user_id: int, background_tasks: BackgroundTasks):
-    background_tasks.add_task(save_prefs, user_id)
-    
-    return{
-        "message":"Параметри користувача зберігаються у фоні",
-        "user_prefs": user_prefs
-    }
-
-
-def user_check_ban(user_id) -> bool:
-    "Дістаєш корисутвача або його uuid"
-    "BanList.filter(user_id=user_id).first()"
-    "Робиш перевірку якщо знайшовся по ід в бан лісті користувач,"
-    "то return False, якщо такого корстувача не знайдено тоді return True"
-
-
-@router.post("/create_product")
-async def create_product(prod_data: Dict, check_ban: bool = Depends(user_check_ban)):
-    if check_ban:
-        "Дозволяєш створбвати"
-    else:
-        "Кидаєш відповідь json з msg = Нажали ви не можете зараз створити проукт, ви забанені ще сткільки часу."
-    pass
-
-
-@router.get("/get_products")
-async def get_product(
-    limit: int = Query(10, gt=0, le=100, description="Кількість товарів на сторінці"),
-    page: int = Query(1),
-    filter_date: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$", description="Дата у форматі YYYY-MM-DD"),
-    price: float = Query(None),
-
+@router.get("/products/feed", response_model=FeedResponse)
+async def product_feed(
+    page: int = Query(1, ge=1),
+    limit: int = Query(20, ge=1, le=100),
+    category_id: int | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID | None = Depends(get_current_user_id_optional),
 ):
-    "витягуємо дані продуктів, якщо перша сторінка page=1,"
-    "і limit=10: витягуємо перші 10 продуктів з 10 включно"
-    "Якщо page=2, limit=10, значить витягуємо з 10 по 20 включно продукт і тд..."
-    "Робимо перевірку чи нам прийшла filter_date, якщо filter_date є не = None то тоді,"
-    "ми не робимо пагінацію, а просто віддаємо продукти по даті"
-    "яка прийшла по полу created_at, поле created_at є істиною"
+    """
+    GET /api/v1/products/feed
 
-    "Робиш перевірку чи price is not None, якщо price прийшов то робиш перевіряєш чи прийшла filter_date"
-    "Якщо прийшли і price і filter_date то ми перше фільтруємо по filter_date, а потім ті вітфільтровані дані фільтруємо по ціні"
-    "Якщо прийшов лише price то просто фільтруємо по ціні"
-    return {
-        "limit": limit,
-        "page": page,
-        "filter_date": filter_date,
-        "price": price if price is not None else None,
-        "product": []
-    }
+    1. Виклич fetch_smart_feed(db, user_id=user_id, page=page, limit=limit, category_id=category_id).
+    2. Збери FeedResponse(items=..., total=...).
+    """
+    items, total = await fetch_smart_feed(
+        db, user_id=user_id, page=page, limit=limit, category_id=category_id
+    )
+    return FeedResponse(items=items, total=total)
 
-    
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("app:app", host="127.0.0.1", port=8000, reload=True)
+
+@router.patch("/products/{product_id}/approve")
+async def approve_product_via_bot(
+    product_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_bot_secret),
+):
+    """
+    PATCH /api/v1/products/{id}/approve — виклик з Telegram-бота (httpx), не з БД в боті.
+
+    1. Перевір product_id; онови Product.status на APPROVE (або ACTIVE за контрактом).
+    2. commit.
+    3. Поверни {"ok": true}.
+
+    Заголовок X-Bot-Secret обов'язковий (verify_bot_secret).
+    """
+    raise HTTPException(
+        status_code=501,
+        detail="Реалізуйте схвалення товару (бот шле PATCH через httpx, без SQLAlchemy в боті).",
+    )
+
+
+@router.patch("/products/{product_id}/reject")
+async def reject_product_via_bot(
+    product_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: bool = Depends(verify_bot_secret),
+):
+    """
+    PATCH /api/v1/products/{id}/reject — відхилення з бота.
+
+    1. Видалити товар або status=REJECTED; застосувати бан продавцю за правилами курсу.
+    2. X-Bot-Secret обов'язковий.
+    """
+    raise HTTPException(
+        status_code=501,
+        detail="Реалізуйте відхилення товару.",
+    )
+
+
+@router.get("/products/{product_id}", response_model=ProductDetailResponse)
+async def product_detail(
+    product_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    GET /api/v1/products/{id}
+
+    1. select(Product).where(Product.id == product_id).options(selectinload(Product.seller)).
+    2. Якщо не знайдено -> 404.
+    3. Побудуй SellerOut з іменем продавця (first_name + last_name).
+    4. Поверни ProductDetailResponse; поле status узгодьте з БД (PENDING / APPROVE / REJECTED).
+    """
+    raise HTTPException(status_code=501, detail="Група 3: реалізуйте картку товару.")
+
+
+@router.post("/products", status_code=201, response_model=ProductCreatedResponse)
+async def create_product(
+    background_tasks: BackgroundTasks,
+    title: str = Form(...),
+    description: str | None = Form(None),
+    price: float = Form(...),
+    category_id: int | None = Form(None),
+    images: list[UploadFile] = File(default_factory=list),
+    db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    """
+    Створення оголошення з multipart/form-data (файли + поля форми).
+    Контракт також описує JSON з images як URL — можна додати окремий ендпоінт або прапорець пізніше.
+
+    1. Перевір, що користувач не забанений: подивись User.banned_until (логіка в сервісі бану).
+    2. Створи Product(seller_id=user_id, title=..., price=..., status='PENDING', ...).
+    3. Для кожного UploadFile у images:
+       - прочитай байти: content = await file.read() (лише в цьому async-обробнику).
+       - збережи файл на диск: наприклад static/products/{product_id}_{safe_filename}.
+       - створи ProductImage(product_id=..., image_url=URL_або_шлях).
+    4. await session.commit(); отримай product.id.
+    5. У фонову задачу передай лише серіалізовані дані (id, title, price, список шляхів до зображень):
+       background_tasks.add_task(..., product_id, title, price, saved_paths, str(user_id)).
+    6. У функції фону виклич publish_new_product_to_moderation(await get_redis(), ...) або redis.publish.
+
+    ВАЖЛИВО: не передавай об'єкт UploadFile у BackgroundTasks.
+
+    Зараз: логіка не реалізована — піднімаємо 501, щоб студенти заповнили кроки.
+    """
+    raise HTTPException(
+        status_code=501,
+        detail="Група 4: реалізуйте збереження файлів у static/ та створення Product згідно docstring.",
+    )
+
+
+@router.post("/products/{product_id}/like", response_model=LikeResponse)
+async def toggle_like(
+    product_id: int,
+    db: AsyncSession = Depends(get_db),
+    user_id: uuid.UUID = Depends(get_current_user_id),
+):
+    """
+    POST /api/v1/products/{id}/like
+
+    1. Перевір наявність рядка в wishlist (user_id, product_id).
+    2. Якщо є — видали (toggle off), якщо немає — додай (toggle on).
+    3. Поверни LikeResponse(is_liked=True/False).
+    """
+    raise HTTPException(status_code=501, detail="Група 4: реалізуйте wishlist.")

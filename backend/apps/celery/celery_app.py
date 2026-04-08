@@ -1,68 +1,62 @@
+"""
+Celery: фонові задачі (наприклад, очищення прострочених банів).
+
+Запуск воркера з каталогу backend:
+  celery -A apps.celery.celery_app.celery_app worker --loglevel=info
+  celery -A apps.celery.celery_app.celery_app beat --loglevel=info
+"""
+from __future__ import annotations
+
 import asyncio
-import sys
 import os
-from datetime import datetime, timedelta
+import sys
+
 from celery import Celery
 from celery.schedules import crontab
-from sqlalchemy import delete
 
-# Піднімаємося на два рівні вгору, щоб дістатися до папки backend
+# Корінь backend/ у sys.path для імпортів common.* та config
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from common.database import AsyncSessionLocal
-from apps.users.models import BanList
+from common.database import AsyncSessionLocal  # noqa: E402
+from config import settings  # noqa: E402
 
-# Створюємо екземпляр Celery
 celery_app = Celery(
     "worker",
-    broker="redis://localhost:6379/0",
-    backend="redis://localhost:6379/0"
+    broker=settings.REDIS_URL,
+    backend=settings.REDIS_URL,
 )
 
-# Налаштування часового поясу (важливо для crontab)
-celery_app.conf.timezone = 'Europe/Kyiv' # Або UTC
-celery_app.conf.broker_connection_retry_on_startup = True
+celery_app.conf.update(
+    timezone="Europe/Kyiv",
+    broker_connection_retry_on_startup=True,
+)
 
-async def delete_expired_bans_logic():
-    """Асинхронна логіка видалення"""
-    print(f"[{datetime.now()}] Starting ban cleanup process...")
+
+async def clear_expired_bans_async() -> None:
+    """
+    Очищення банів, термін яких минув (поле users.banned_until з API-contract.md).
+
+    1. async with AsyncSessionLocal() as session.
+    2. Запит: select(User).where(User.banned_until.is_not(None)).
+    3. Відфільтруй у Python або SQL: banned_until < datetime.now(timezone.utc).
+    4. Для кожного: онови banned_until на NULL, ban_reason на NULL (update(User).where(...).values(...)).
+    5. await session.commit().
+
+    Зараз: без реалізації — додайте логіку за цим планом (SQLAlchemy 2.0 async).
+    """
     async with AsyncSessionLocal() as session:
-        try:
-            # Обчислюємо межу: все, що було до "зараз мінус 3 дні"
-            threshold_date = datetime.now() - timedelta(days=3)
-            
-            # Створюємо запит на видалення
-            stmt = delete(BanList).where(BanList.start_ban_date <= threshold_date)
-            
-            result = await session.execute(stmt)
-            await session.commit()
-            print(f"[{datetime.now()}] Deleted {result.rowcount} expired bans.")
-        except Exception as e:
-            await session.rollback()
-            print(f"[{datetime.now()}] Error during ban cleanup: {e}")
-            raise e
+        pass
 
-@celery_app.task(name="check_and_remove_bans")
-def check_and_remove_bans():
-    """
-    Синхронна обгортка для Celery.
-    Використовуємо новий event loop, щоб уникнути конфліктів.
-    """
-    loop = asyncio.get_event_loop()
-    if loop.is_running():
-        # Якщо ми в середовищі, де loop вже запущено
-        asyncio.ensure_future(delete_expired_bans_logic())
-    else:
-        loop.run_until_complete(delete_expired_bans_logic())
 
-# Налаштування розкладу
+@celery_app.task(name="apps.celery.celery_app.clear_expired_bans")
+def clear_expired_bans() -> None:
+    """Синхронна обгортка: asyncio.run(clear_expired_bans_async())."""
+    asyncio.run(clear_expired_bans_async())
+
+
 celery_app.conf.beat_schedule = {
-    "remove-old-bans-daily": {
-        "task": "check_and_remove_bans",
-        "schedule": crontab(minute=1), # Кожну хвилину
-        # Для тесту можна поставити: 'schedule': timedelta(seconds=30),
+    "clear-expired-bans": {
+        "task": "apps.celery.celery_app.clear_expired_bans",
+        "schedule": crontab(minute="*/5"),
     },
 }
-
-#celery -A apps.celery.celery_app.celery_app worker --loglevel=info
-#celery -A apps.celery.celery_app.celery_app beat --loglevel=info
