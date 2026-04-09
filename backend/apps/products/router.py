@@ -113,10 +113,39 @@ async def reject_product_via_bot(
     1. Видалити товар або status=REJECTED; застосувати бан продавцю за правилами курсу.
     2. X-Bot-Secret обов'язковий.
     """
-    raise HTTPException(
-        status_code=501,
-        detail="Реалізуйте відхилення товару.",
+    
+    result = await db.execute(
+        select(Product).where(Product.id == product_id)
     )
+    product = result.scalar_one_or_none()
+
+    if not product:
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found"
+        )
+
+    
+    product.status = "REJECTED"
+
+    
+    seller_result = await db.execute(
+        select(Seller).where(Seller.id == product.seller_id)
+    )
+    seller = seller_result.scalar_one_or_none()
+
+    if seller:
+        seller.is_banned = True  
+
+    
+    await db.commit()
+    await db.refresh(product)
+
+    return {
+        "message": "Product rejected and seller banned",
+        "product_id": product.id,
+        "status": product.status
+    }
 
 
 @router.get("/products/{product_id}", response_model=ProductDetailResponse)
@@ -132,7 +161,37 @@ async def product_detail(
     3. Побудуй SellerOut з іменем продавця (first_name + last_name).
     4. Поверни ProductDetailResponse; поле status узгодьте з БД (PENDING / APPROVE / REJECTED).
     """
-    raise HTTPException(status_code=501, detail="Група 3: реалізуйте картку товару.")
+    result = await db.execute(
+        select(Product)
+        .where(Product.id == product_id)
+        .options(selectinload(Product.seller))
+    )
+
+    product = result.scalar_one_or_none()
+
+    # 2. Если не найдено → 404
+    if not product:
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found"
+        )
+
+    
+    seller = product.seller
+    seller_out = SellerOut(
+        id=seller.id,
+        full_name=f"{seller.first_name} {seller.last_name}"
+    )
+
+    
+    return ProductDetailResponse(
+        id=product.id,
+        title=product.title,
+        description=product.description,
+        price=product.price,
+        status=product.status,  
+        seller=seller_out
+    )
 
 
 @router.post("/products", status_code=201, response_model=ProductCreatedResponse)
