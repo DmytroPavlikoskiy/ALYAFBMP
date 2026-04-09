@@ -25,6 +25,9 @@ from apps.moderation.deps import verify_bot_secret
 from apps.products.services.feed import fetch_smart_feed
 from common.database import get_db
 from common.deps import get_current_user_id, get_current_user_id_optional
+from common.models import Product
+from datetime import datetime, timezone
+
 
 router = APIRouter()
 
@@ -75,6 +78,23 @@ async def approve_product_via_bot(
 
     Заголовок X-Bot-Secret обов'язковий (verify_bot_secret).
     """
+    product = await db.get(Product, product_id)
+
+    if not product:
+        raise HTTPException(status_code=404, detail="Товар не знайдено")
+    
+    try:
+        if product:
+            product.status = "APPROVE"
+            now = datetime.now(timezone.utc)
+            product.updated_at = now
+            await db.commit()
+            return {"ok": True}
+    except Exception as ex:
+        print(ex)
+        await db.rollback()
+        return {"ok": False, 'error': str(ex)}
+
     raise HTTPException(
         status_code=501,
         detail="Реалізуйте схвалення товару (бот шле PATCH через httpx, без SQLAlchemy в боті).",
