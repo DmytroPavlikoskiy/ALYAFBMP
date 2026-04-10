@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import uuid
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from apps.orders.schemas import OrderCreateBody, OrderCreatedResponse
 from common.database import get_db
 from common.deps import get_current_user_id
+
+from backend.common.models import Product, Order
 
 router = APIRouter()
 
@@ -18,13 +20,25 @@ async def create_order(
     db: AsyncSession = Depends(get_db),
     buyer_id: uuid.UUID = Depends(get_current_user_id),
 ):
-    """
-    POST /api/v1/orders
+    result = await db.execute(
+        select(Product).where(Product.id == body.product_id)
+    )
+    product = result.scalar_one_or_none()
 
-    1. Перевір, що product існує і статус дозволяє покупку.
-    2. Створи Order(buyer_id=buyer_id, product_id=..., status='CREATED').
-    3. commit; поверни order_id.
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
 
-    Роутер змонтовано з префіксом /orders -> шлях "" дає POST /api/v1/orders.
-    """
-    raise HTTPException(status_code=501, detail="Група 6: реалізуйте замовлення.")
+    if product.status != "AVAILABLE":
+        raise HTTPException(status_code=400, detail="Product not available")
+
+    new_order = Order(
+        buyer_id=buyer_id,
+        product_id=product.id,
+        status="CREATED"
+    )
+
+    db.add(new_order)
+    await db.commit()
+    await db.refresh(new_order)
+
+    return OrderCreatedResponse(order_id=new_order.id)
