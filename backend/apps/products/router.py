@@ -25,17 +25,23 @@ from apps.products.schemas import (
     ProductCreatedResponse,
     ProductDetailResponse,
 )
+from pathlib import Path
+import aiofiles
 from apps.moderation.deps import verify_bot_secret
 from apps.products.services.feed import fetch_smart_feed
 from common.database import get_db
+from common.redis_client import get_redis
 from common.deps import get_current_user_id, get_current_user_id_optional
 from common.models import Product, User, Category, ProductImage
 from common.models import User
 from datetime import datetime, timezone, timedelta
 from apps.products.schemas import SellerOut, ProductDetailResponse
-
+from apps.products.services.moderation_redis import publish_new_product_to_moderation
 
 router = APIRouter()
+
+UPLOAD_DIR = Path("static/products")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @router.get("/categories", response_model=list[CategoryOut])
@@ -206,6 +212,19 @@ async def product_detail(
     )
 
 
+async def moderation_wrapper(product_id, title, price, image_urls, seller_id):
+    # Використовуємо твій готовий get_redis()
+    redis_conn = await get_redis()
+    await publish_new_product_to_moderation(
+        redis=redis_conn,
+        product_id=product_id,
+        title=title,
+        price=price,
+        image_urls=image_urls,
+        seller_id=seller_id
+    )
+
+
 @router.post("/products", status_code=201, response_model=ProductCreatedResponse)
 async def create_product(
     background_tasks: BackgroundTasks,
@@ -236,10 +255,56 @@ async def create_product(
 
     Зараз: логіка не реалізована — піднімаємо 501, щоб студенти заповнили кроки.
     """
-    raise HTTPException(
-        status_code=501,
-        detail="Група 4: реалізуйте збереження файлів у static/ та створення Product згідно docstring.",
+    user = await db.get(User, user_id)
+    if user and user.banned_until:
+        if user.banned_until > datetime.now(timezone.utc):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Ви забанені до {user.banned_until.strftime("%Y:%m:%d - %H:M")}"
+            )
+    
+    new_product = Product(
+        seller_id=user_id,
+        title=title,
+        description=description,
+        price=price,
+        category_id=category_id,
+        status="PENDING"
     )
+    db.add(new_product)
+    await db.flush()
+
+    image_urls = []
+
+    for file in images:
+        file_ext = Path(file.filename).suffix
+        safe_filename = f"{new_product.id}_{uuid.uuid4().hex}{file_ext}"
+        file_path = UPLOAD_DIR / safe_filename
+
+        content = await file.read()
+        async with aiofiles.open(file_path, 'wb') as out_file:
+            await out_file.write(content)
+        
+        relate_path  = str(f"{UPLOAD_DIR}/{safe_filename}")
+        image_urls.append(relate_path)
+
+        new_image = ProductImage(
+            product_id=new_product.id,
+            image_url=relate_path
+        )
+        db.add(new_image)
+    
+    try:
+        await db.commit()
+        await db.refresh(new_product)
+    except Exception as ex:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Помилка збереження даних")
+
+    background_tasks.add_task(moderation_wrapper, new_product.id, title, float(price), image_urls, user_id)
+    
+    return ProductCreatedResponse(id=new_product.id, status=new_product.status)
+
 
 
 @router.post("/products/{product_id}/like", response_model=LikeResponse)

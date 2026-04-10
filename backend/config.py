@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
     # --- PostgreSQL (asyncpg через SQLAlchemy URL) ---
     DATABASE_URL: str = Field(
-        default="postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/marketplace",
+        default="postgresql+asyncpg://postgres:1111@127.0.0.1:5432/marketplace",
         description="Рядок підключення async (postgresql+asyncpg://...)",
     )
 

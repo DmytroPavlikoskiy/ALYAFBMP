@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 from apps.admin.admin_panel import mount_sqladmin
 from apps.auth.router import router as auth_router
@@ -41,6 +42,9 @@ app = FastAPI(
     debug=settings.DEBUG,
     lifespan=lifespan,
 )
+
+STATIC_DIR = Path("static")
+STATIC_DIR.mkdir(parents=False, exist_ok=True)
 
 app.add_middleware(
     CORSMiddleware,
