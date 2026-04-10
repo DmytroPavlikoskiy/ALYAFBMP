@@ -18,7 +18,7 @@ security = HTTPBearer(auto_error=False)
 JWT_SECRET = os.getenv("JWT_SECRET")
 ALGORITHM = os.getenv("ALGORITHM")
 
-
+#3
 async def get_current_user_id(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: AsyncSession = Depends(get_db),
