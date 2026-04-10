@@ -13,6 +13,10 @@ from fastapi import (
     UploadFile,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload, joinedload
+
+from typing import Any
 
 from apps.products.schemas import (
     CategoryOut,
@@ -25,8 +29,10 @@ from apps.moderation.deps import verify_bot_secret
 from apps.products.services.feed import fetch_smart_feed
 from common.database import get_db
 from common.deps import get_current_user_id, get_current_user_id_optional
-from common.models import Product
-from datetime import datetime, timezone
+from common.models import Product, User, Category, ProductImage
+from common.models import User
+from datetime import datetime, timezone, timedelta
+from apps.products.schemas import SellerOut, ProductDetailResponse
 
 
 router = APIRouter()
@@ -57,10 +63,10 @@ async def product_feed(
     1. Виклич fetch_smart_feed(db, user_id=user_id, page=page, limit=limit, category_id=category_id).
     2. Збери FeedResponse(items=..., total=...).
     """
-    items, total = await fetch_smart_feed(
+    feed_items, total = await fetch_smart_feed(
         db, user_id=user_id, page=page, limit=limit, category_id=category_id
     )
-    return FeedResponse(items=items, total=total)
+    return FeedResponse(feed_items=feed_items, total=total)
 
 
 @router.patch("/products/{product_id}/approve")
@@ -95,11 +101,6 @@ async def approve_product_via_bot(
         await db.rollback()
         return {"ok": False, 'error': str(ex)}
 
-    raise HTTPException(
-        status_code=501,
-        detail="Реалізуйте схвалення товару (бот шле PATCH через httpx, без SQLAlchemy в боті).",
-    )
-
 
 @router.patch("/products/{product_id}/reject")
 async def reject_product_via_bot(
@@ -107,45 +108,45 @@ async def reject_product_via_bot(
     db: AsyncSession = Depends(get_db),
     _: bool = Depends(verify_bot_secret),
 ):
-    """
-    PATCH /api/v1/products/{id}/reject — відхилення з бота.
+    try:
+        # 1. Пошук продукту (використовуємо await db.get для швидкості)
+        product = await db.get(Product, product_id)
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
 
-    1. Видалити товар або status=REJECTED; застосувати бан продавцю за правилами курсу.
-    2. X-Bot-Secret обов'язковий.
-    """
-    
-    result = await db.execute(
-        select(Product).where(Product.id == product_id)
-    )
-    product = result.scalar_one_or_none()
+        # 2. Оновлюємо статус продукту
+        product.status = "REJECTED"
+        product.updated_at = datetime.now(timezone.utc)
 
-    if not product:
-        raise HTTPException(
-            status_code=404,
-            detail="Product not found"
-        )
+        # 3. Логіка бану
+        ban_duration = timedelta(days=3)
+        now = datetime.now(timezone.utc)
+        unban_date = now + ban_duration
 
-    
-    product.status = "REJECTED"
+        # 4. Пошук продавця (User)
+        seller = await db.get(User, product.seller_id)
+        if seller:
+            seller.is_banned = True  
+            seller.banned_until = unban_date
 
-    
-    seller_result = await db.execute(
-        select(Seller).where(Seller.id == product.seller_id)
-    )
-    seller = seller_result.scalar_one_or_none()
+        # 5. Збереження
+        await db.commit()
+        
+        # Освіжаємо об'єкт, щоб повернути актуальні дані
+        await db.refresh(product)
 
-    if seller:
-        seller.is_banned = True  
+        return {
+            "ok": True,
+            "message": "Product rejected and seller banned for 3 days",
+            "product_id": product.id,
+            "banned_until": unban_date
+        }
 
-    
-    await db.commit()
-    await db.refresh(product)
+    except Exception as e:
+        await db.rollback()
+        print(f"Помилка при відхиленні: {e}")
+        return {"ok": False, "error": str(e)}
 
-    return {
-        "message": "Product rejected and seller banned",
-        "product_id": product.id,
-        "status": product.status
-    }
 
 
 @router.get("/products/{product_id}", response_model=ProductDetailResponse)
@@ -161,13 +162,19 @@ async def product_detail(
     3. Побудуй SellerOut з іменем продавця (first_name + last_name).
     4. Поверни ProductDetailResponse; поле status узгодьте з БД (PENDING / APPROVE / REJECTED).
     """
-    result = await db.execute(
+    stmt_prod = (
         select(Product)
         .where(Product.id == product_id)
-        .options(selectinload(Product.seller))
+        .options(
+            joinedload(Product.seller),
+            joinedload(Product.category),
+            selectinload(Product.images)
+        )
     )
+    
+    result = await db.execute(stmt_prod)
 
-    product = result.scalar_one_or_none()
+    product = result.unique().scalar_one_or_none()
 
     # 2. Если не найдено → 404
     if not product:
@@ -176,11 +183,13 @@ async def product_detail(
             detail="Product not found"
         )
 
-    
-    seller = product.seller
+    last_name = product.seller.last_name or ""
+    full_name = f"{product.seller.first_name} {last_name}".strip()
+
     seller_out = SellerOut(
-        id=seller.id,
-        full_name=f"{seller.first_name} {seller.last_name}"
+        id=product.seller.id,
+        full_name=full_name,
+        avatar_url=product.seller.avatar_url
     )
 
     
@@ -188,8 +197,11 @@ async def product_detail(
         id=product.id,
         title=product.title,
         description=product.description,
-        price=product.price,
-        status=product.status,  
+        price=float(product.price),
+        status=product.status,
+        created_at=product.created_at,
+        category_name=product.category.name if product.category else "Без категорії",
+        images=[img.image_url for img in product.images], # Витягуємо лише URL
         seller=seller_out
     )
 

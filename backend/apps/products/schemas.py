@@ -44,13 +44,14 @@ class FeedItem(BaseModel):
 
 
 class FeedResponse(BaseModel):
-    items: list[FeedItem]
+    feed_items: list[FeedItem]
     total: int
 
 
 class SellerOut(BaseModel):
     id: UUID
-    name: str
+    full_name: str
+    avatar_url: str
 
 
 class ProductDetailResponse(BaseModel):
