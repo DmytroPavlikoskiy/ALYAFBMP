@@ -3,16 +3,16 @@
 Префікс /api/v1 задається в main.py.
 """
 from __future__ import annotations
-
-import uuid
-
 from fastapi import APIRouter, Depends, HTTPException, WebSocket
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from common.database import get_db
-from common.deps import get_current_user_id
-
-router = APIRouter()
+from ALYAFBMP.backend.apps.bot.botkeyboard import router
+from ALYAFBMP.backend.apps.communication.ws_manager import manager
+from ALYAFBMP.backend.common.database import get_db
+from ALYAFBMP.backend.common.deps import get_current_user_id
+import uuid
+from datetime import datetime
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
 
 
 @router.get("/chats")
@@ -31,20 +31,30 @@ async def list_chats(
 
 
 @router.websocket("/ws/chat/{chat_id}")
-async def chat_websocket(websocket: WebSocket, chat_id: uuid.UUID):
-    """
-    WS /api/v1/ws/chat/{chat_id}
+async def chat_websocket(
+    websocket: WebSocket,
+    chat_id: uuid.UUID,
+    token: str = Query(...),
+    db: AsyncSession = Depends(get_db)
+):
+    user_id = await get_current_user_id(token, db)
+    if not user_id:
+        await websocket.close(code=1008)
+        return
 
-    1. await websocket.accept().
-    2. Авторизуй користувача (токен у query ?token= або підпротокол — узгодьте).
-    3. Перевір, що user має доступ до цього chat_id.
-    4. Цикл while True: data = await websocket.receive_json(); збережи Message в БД; розішли іншим клієнтам.
-    5. Оброби WebSocketDisconnect.
+    await manager.connect(websocket, chat_id)
 
-    Зараз: мінімальна заглушка.
-    """
-    await websocket.accept()
     try:
-        await websocket.send_json({"detail": "Група 6: реалізуйте протокол повідомлень."})
-    finally:
-        await websocket.close()
+        while True:
+            data = await websocket.receive_json()
+
+            response = {
+                "sender_id": str(user_id),
+                "text": data.get("text"),
+                "sent_at": datetime.utcnow().isoformat()
+            }
+
+            await manager.broadcast(response, chat_id)
+
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, chat_id)
