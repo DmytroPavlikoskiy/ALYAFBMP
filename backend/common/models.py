@@ -47,6 +47,7 @@ class User(Base):
     created_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP")
     )
+    is_banned: Mapped[Optional[bool]] = mapped_column(Boolean, default=False)
 
     preferences: Mapped[List["Category"]] = relationship(
         secondary="user_preferences",
@@ -101,6 +102,7 @@ class Product(Base):
     )
 
     seller: Mapped[User] = relationship(back_populates="products")
+    category: Mapped[Optional["Category"]] = relationship()
     images: Mapped[List["ProductImage"]] = relationship(
         back_populates="product",
         cascade="all, delete-orphan",
