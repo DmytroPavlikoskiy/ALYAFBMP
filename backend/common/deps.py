@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 import os
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends,  HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
