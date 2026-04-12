@@ -6,10 +6,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, WebSocket
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ALYAFBMP.backend.apps.bot.botkeyboard import router
-from ALYAFBMP.backend.apps.communication.ws_manager import manager
-from ALYAFBMP.backend.common.database import get_db
-from ALYAFBMP.backend.common.deps import get_current_user_id
+from apps.bot.botkeyboard import router
+from apps.communication.ws_manager import manager
+from common.database import get_db
+from common.deps import get_current_user_id
 import uuid
 from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
