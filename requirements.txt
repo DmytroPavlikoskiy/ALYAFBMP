@@ -1,8 +1,8 @@
 # --- Core Backend (FastAPI) ---
 fastapi==0.110.0
 uvicorn[standard]==0.27.1
-pydantic[email]==2.6.3
-pydantic-settings==2.2.1
+pydantic[email]
+pydantic-settings
 
 # --- Database (PostgreSQL & ORM) ---
 sqlalchemy==2.0.28
@@ -35,7 +35,7 @@ greenlet==3.0.3      # Потрібен для асинхронних прокс
 pytz==2024.1         # Стандарт для роботи з Timezones
 
 # --- Telegram Bot (Moderation) ---
-aiogram==3.4.1
+aiogram
 
 # --- Utilities & Tools ---
 python-dotenv==1.0.1

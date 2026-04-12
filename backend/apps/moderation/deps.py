@@ -10,3 +10,10 @@ async def verify_bot_secret(x_bot_secret: str | None = Header(default=None, alia
     if x_bot_secret is None or x_bot_secret != settings.BOT_SECRET:
         raise HTTPException(status_code=401, detail="INVALID_BOT_SECRET")
     return True
+
+
+
+async def soft_verify_bot_secret(x_bot_secret: str | None = Header(default=False, alias="X-Bot_Secret")) -> bool:
+    if x_bot_secret is None or x_bot_secret != settings.BOT_SECRET:
+        return False
+    return True

@@ -23,7 +23,9 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access: str
     refresh: str
+    token_type: str
 
 
 class RegisterResponse(BaseModel):
-    user_id: UUID
+    user_id: UUID = None
+    status: str = None

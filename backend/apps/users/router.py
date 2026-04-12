@@ -6,10 +6,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.users.schemas import NotificationItem, PreferencesBody, UserMeResponse
 from common.database import get_db
 from common.deps import get_current_user_id
+from common.models import Notification
+from sqlalchemy import select
+
 
 router = APIRouter()
 
 
+#Ксенія
 @router.get("/me", response_model=UserMeResponse)
 async def read_me(
     db: AsyncSession = Depends(get_db),
@@ -26,6 +30,14 @@ async def read_me(
     raise HTTPException(status_code=501, detail="Група 1–2: реалізуйте профіль.")
 
 
+
+
+# async def get_admins(
+#     _: bool = Depends(verify_bot_secret),
+# )
+
+
+#Mark
 @router.post("/me/preferences")
 async def save_preferences(
     body: PreferencesBody,
@@ -43,15 +55,46 @@ async def save_preferences(
     raise HTTPException(status_code=501, detail="Група 2: збережіть preferences.")
 
 
+
 @router.get("/me/notifications", response_model=list[NotificationItem])
 async def list_notifications(
     db: AsyncSession = Depends(get_db),
     user_id=Depends(get_current_user_id),
 ):
-    """
-    GET /api/v1/users/me/notifications
+    query = (
+        select(Notification)
+        .where(Notification.user_id == user_id)
+        .order_by(Notification.created_at.desc())
+    )
+    
+    result = await db.execute(query)
+    notifications = result.scalars().all()
 
-    1. select(Notification).where(Notification.user_id == user_id).order_by(Notification.created_at.desc()).
-    2. Смапи в NotificationItem.
-    """
-    raise HTTPException(status_code=501, detail="Група 5: реалізуйте сповіщення.")
+    return notifications
+
+# @router.get("/me/notifications", response_model=list[NotificationItem])
+# async def list_notifications(
+#     db: AsyncSession = Depends(get_db),
+#     user_id=Depends(get_current_user_id),
+# ):
+#     """
+#     GET /api/v1/users/me/notifications
+
+#     1. select(Notification).where(Notification.user_id == user_id).order_by(Notification.created_at.desc()).
+#     2. Смапи в NotificationItem.
+#     """
+#     # [
+#     #     {
+#     #         id: int
+#     #         text: str
+#     #         type: str
+#     #         created_at: datetime
+#     #     },
+#     #     {
+#     #         id: int
+#     #         text: str
+#     #         type: str
+#     #         created_at: datetime
+#     #     }
+#     # ]
+#     raise HTTPException(status_code=501, detail="Група 5: реалізуйте сповіщення.")

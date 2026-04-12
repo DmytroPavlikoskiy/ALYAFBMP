@@ -54,6 +54,10 @@ class Settings(BaseSettings):
         default="dev-only-change-me-in-production",
         description="Секрет підпису access/refresh JWT",
     )
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(
+        default=7,
+        description="Час життя refresh token, для перегенерації access_token"
+    )
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
