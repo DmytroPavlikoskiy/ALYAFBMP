@@ -1,0 +1,20 @@
+# Dependencies installed inside the container
+node_modules/
+
+# Production build output (not needed for dev image)
+dist/
+build/
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*

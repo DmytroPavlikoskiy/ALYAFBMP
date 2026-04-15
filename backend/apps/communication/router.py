@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
@@ -40,9 +40,12 @@ class ChatOut(BaseModel):
 
 
 class MessageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
     id: int
     sender_id: uuid.UUID
-    text: str
+    # ORM attribute is text_msg; keep the JSON key as "text" for frontend compatibility
+    text: str = Field(validation_alias="text_msg")
     sent_at: datetime | None
 
 
@@ -120,7 +123,7 @@ async def list_chats(
             else None
         )
         last_msg = (
-            sorted(chat.messages, key=lambda m: m.sent_at or datetime.min)[-1].text
+            sorted(chat.messages, key=lambda m: m.sent_at or datetime.min)[-1].text_msg
             if chat.messages
             else None
         )
@@ -201,7 +204,7 @@ async def chat_websocket(
             if not text:
                 continue
 
-            msg = Message(chat_id=chat_id, sender_id=user_id, text=text)
+            msg = Message(chat_id=chat_id, sender_id=user_id, text_msg=text)
             db.add(msg)
             await db.commit()
             await db.refresh(msg)

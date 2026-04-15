@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class PreferencesBody(BaseModel):
@@ -19,7 +19,11 @@ class UserMeResponse(BaseModel):
 
 
 class NotificationItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
     id: int
-    text: str
+    # ORM attribute is text_notification; keep the JSON key as "text" for frontend compatibility
+    text: str = Field(validation_alias="text_notification")
     type: str
+    is_read: bool
     created_at: datetime

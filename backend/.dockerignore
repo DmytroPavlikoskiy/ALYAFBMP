@@ -1,0 +1,34 @@
+# Python cache
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment / secrets (injected via docker-compose environment:)
+.env
+.env_dev
+*.env
+
+# Test artefacts
+.pytest_cache/
+tests/
+*.db
+celerybeat-schedule.db
+
+# Dist / build
+dist/
+build/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store

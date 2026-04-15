@@ -63,7 +63,7 @@ async def moderation_decision(
         db.add(
             Notification(
                 user_id=seller.id,
-                text=notification_text,
+                text_notification=notification_text,
                 type=notification_type,
             )
         )

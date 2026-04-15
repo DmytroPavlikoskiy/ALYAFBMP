@@ -21,6 +21,8 @@ coverage.xml
 .env
 .env.local
 .env.*
+# Keep the Docker template committed (it contains no real secrets)
+!.env.docker
 .venv
 venv/
 ENV/

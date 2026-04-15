@@ -83,7 +83,7 @@ async def notify_seller_new_order_async(order_id: int, seller_id: str) -> None:
 
         notification = Notification(
             user_id=_uuid.UUID(seller_id),
-            text=f"New order #{order_id} has been placed for your product.",
+            text_notification=f"New order #{order_id} has been placed for your product.",
             type="NEW_ORDER",
         )
         session.add(notification)

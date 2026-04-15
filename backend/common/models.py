@@ -165,11 +165,11 @@ class Notification(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    text: Mapped[str] = mapped_column(Text, nullable=False)
+    text_notification: Mapped[str] = mapped_column("text", Text, nullable=False)
     type: Mapped[str] = mapped_column(String(20), server_default="'INFO'")
     is_read: Mapped[bool] = mapped_column(Boolean, server_default="false")
     created_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), server_default="CURRENT_TIMESTAMP"
+        DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP")
     )
 
 
@@ -210,9 +210,9 @@ class Message(Base):
     sender_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    text: Mapped[str] = mapped_column(Text, nullable=False)
+    text_msg: Mapped[str] = mapped_column("text", Text, nullable=False)
     sent_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), server_default="CURRENT_TIMESTAMP"
+        DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP")
     )
 
     chat: Mapped["Chat"] = relationship(back_populates="messages")

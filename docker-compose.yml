@@ -1,0 +1,214 @@
+# ============================================================================
+#  Marketplace MVP — full-stack Docker Compose configuration
+#  Usage:
+#    cp .env.docker .env          # fill in BOT_TOKEN (required) + secrets
+#    docker-compose up --build    # build images and start all services
+#
+#  Services exposed on the host:
+#    http://localhost:8000   — FastAPI  (+ /docs, /redoc)
+#    http://localhost:5173   — React/Vite frontend
+#    http://localhost:5555   — Flower  (Celery monitoring)
+# ============================================================================
+
+version: "3.9"
+
+# ── Shared backend configuration (YAML anchor) ────────────────────────────
+# All Python services (backend, worker, beat, flower, bot) share one image
+# built from backend/Dockerfile.  Each service overrides `command:` and
+# optionally `depends_on:` while inheriting everything else.
+x-backend-common: &backend-common
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  environment:
+    # ── Database ──────────────────────────────────────────────────────────
+    # "db" is the service name — Docker's embedded DNS resolves it inside
+    # the app-net network.
+    DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/marketplace
+
+    # ── Redis ─────────────────────────────────────────────────────────────
+    REDIS_URL: redis://redis:6379/0
+
+    # ── Internal API URL (used by the Telegram bot → FastAPI) ─────────────
+    # "backend" is the service name — reachable only within app-net.
+    API_BASE_URL: http://backend:8000
+
+    # ── CORS (browser → FastAPI) ───────────────────────────────────────────
+    # The browser runs on the host, so "localhost" URLs are correct here.
+    CORS_ORIGINS: "http://localhost:5173,http://localhost:3000"
+
+    # ── JWT / Auth ─────────────────────────────────────────────────────────
+    # Override JWT_SECRET in .env with a strong random value for production.
+    JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-in-production}
+    ALGORITHM: HS256
+    ACCESS_TOKEN_EXPIRE_MINUTES: 30
+    REFRESH_TOKEN_EXPIRE_DAYS: 7
+
+    # ── Telegram Bot ───────────────────────────────────────────────────────
+    BOT_TOKEN: ${BOT_TOKEN:-}          # REQUIRED — set in .env
+    BOT_SECRET: ${BOT_SECRET:-dev-bot-secret}
+    TG_CHANNEL_ID: ${TG_CHANNEL_ID:-0}
+    ADMIN_ID: ${ADMIN_ID:-0}
+
+    # ── Misc ───────────────────────────────────────────────────────────────
+    PYTHONUNBUFFERED: "1"
+  networks:
+    - app-net
+  restart: unless-stopped
+
+
+# ============================================================================
+services:
+
+  # ── PostgreSQL 15 ──────────────────────────────────────────────────────────
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: marketplace
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d marketplace"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - app-net
+    restart: unless-stopped
+
+  # ── Redis (Celery broker + pub/sub + JWT cache for bot) ───────────────────
+  redis:
+    image: redis:alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks:
+      - app-net
+    restart: unless-stopped
+
+  # ── Alembic migrations (runs once, then exits) ─────────────────────────────
+  # backend waits for this service to finish successfully before starting.
+  migrator:
+    <<: *backend-common
+    command: alembic upgrade head
+    # Override restart so it really runs once and stops.
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ── FastAPI backend ────────────────────────────────────────────────────────
+  backend:
+    <<: *backend-common
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      # Bind-mount source for hot-reload (uvicorn --reload watches /app)
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+
+  # ── Celery worker ──────────────────────────────────────────────────────────
+  # Module path:  apps.celery.celery_app  →  celery_app object
+  # --concurrency=2 is safe for development; raise it in production.
+  worker:
+    <<: *backend-common
+    command: >
+      celery -A apps.celery.celery_app.celery_app worker
+      --loglevel=info
+      --concurrency=2
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── Celery beat (periodic task scheduler) ─────────────────────────────────
+  # Writes celerybeat-schedule.db to /app — persisted via the bind-mount.
+  beat:
+    <<: *backend-common
+    command: >
+      celery -A apps.celery.celery_app.celery_app beat
+      --loglevel=info
+    volumes:
+      - ./backend:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # ── Flower (Celery monitoring UI) ─────────────────────────────────────────
+  flower:
+    <<: *backend-common
+    command: >
+      celery -A apps.celery.celery_app.celery_app flower
+      --port=5555
+    ports:
+      - "5555:5555"
+    depends_on:
+      redis:
+        condition: service_healthy
+    # Flower is a dev tool; it is OK if it fails to start on first attempt.
+    restart: on-failure
+
+  # ── Telegram bot ───────────────────────────────────────────────────────────
+  # The bot lives inside the backend codebase (apps/bot/bot.py) and makes
+  # HTTP calls to the `backend` service via API_BASE_URL=http://backend:8000.
+  # It does NOT import SQLAlchemy / common.database directly.
+  bot:
+    <<: *backend-common
+    command: python -m apps.bot.bot
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ── React / Vite frontend ──────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    volumes:
+      # Full source bind-mount enables HMR (Vite watches file changes).
+      - ./frontend:/app
+      # Preserve the container's node_modules so the host directory
+      # (which has no node_modules) doesn't shadow the installed packages.
+      - /app/node_modules
+    environment:
+      # Vite exposes VITE_* variables to the browser bundle.
+      # The browser runs on the HOST, so http://localhost:8000 is correct
+      # (Docker forwards host:8000 → backend container:8000).
+      - VITE_API_BASE_URL=http://localhost:8000/api/v1
+    networks:
+      - app-net
+    restart: unless-stopped
+
+
+# ============================================================================
+volumes:
+  # Named volume so PostgreSQL data survives `docker-compose down`
+  postgres_data:
+
+networks:
+  # Custom bridge network: every service can reach every other service
+  # by its service name (e.g. "db", "redis", "backend").
+  app-net:
+    driver: bridge
