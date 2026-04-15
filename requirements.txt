@@ -36,7 +36,7 @@ greenlet==3.0.3      # Потрібен для асинхронних прокс
 pytz==2024.1         # Стандарт для роботи з Timezones
 
 # --- Telegram Bot (Moderation) ---
-aiogram
+aiogram>=3.0,<4.0
 
 # --- Rate limiting ---
 slowapi==0.1.9

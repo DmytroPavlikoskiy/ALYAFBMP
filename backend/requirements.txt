@@ -36,7 +36,9 @@ greenlet==3.0.3
 pytz==2024.1
 
 # --- Telegram Bot ---
-aiogram
+# F (MagicFilter), Router, FSMContext were introduced in aiogram 3.0.
+# Without a version pin pip may resolve to aiogram 2.x which does not have F.
+aiogram>=3.0,<4.0
 
 # --- Rate limiting ---
 slowapi==0.1.9

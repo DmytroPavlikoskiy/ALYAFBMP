@@ -90,8 +90,12 @@ async def run_async_migrations() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
-    configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = settings.DATABASE_URL
+    # config.set_main_option mutates the Alembic Config object in-place so that
+    # the subsequent config.get_section() call inside run_async_migrations()
+    # returns the correct DATABASE_URL from the environment, NOT the hard-coded
+    # localhost URL in alembic.ini.  Assigning to a local dict copy (as was done
+    # before) has no effect on the config object itself.
+    config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
     asyncio.run(run_async_migrations())
 
 
