@@ -4,6 +4,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, EmailStr, Field
 
+#Сніжана, Ксенія, Юра
+
 
 class RegisterRequest(BaseModel):
     email: EmailStr

@@ -27,6 +27,7 @@ router = APIRouter()
 
 logging.basicConfig(level=logging.WARNING)
 
+#Сніжана, Ксенія, Юра
 
 @router.post("/register", status_code=201, response_model=RegisterResponse)
 async def register(

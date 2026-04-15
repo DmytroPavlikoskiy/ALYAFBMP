@@ -5,6 +5,8 @@ from fastapi import Header, HTTPException
 
 from config import settings
 
+#Матвій, Тимофій, Женя Л.
+
 
 async def verify_bot_secret(x_bot_secret: str | None = Header(default=None, alias="X-Bot-Secret")) -> bool:
     if x_bot_secret is None or x_bot_secret != settings.BOT_SECRET:

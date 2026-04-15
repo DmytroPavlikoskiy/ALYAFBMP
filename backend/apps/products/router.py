@@ -34,7 +34,7 @@ from common.redis_client import get_redis
 from common.deps import get_current_user_id, get_current_user_id_optional, verify_user_not_banned
 from common.rate_limit import rate_limit
 from common.models import Product, User, Category, ProductImage, Wishlist
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from apps.products.schemas import (SellerOut, ProductDetailResponse,
                                    ProductsListLikeResponse, ProductsListLike)
 from apps.products.services.moderation_redis import publish_new_product_to_moderation
@@ -45,6 +45,7 @@ UPLOAD_DIR = Path("static/products")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
+#Тимофій
 @router.get("/categories", response_model=list[CategoryOut])
 async def list_categories(db: AsyncSession = Depends(get_db)):
     """GET /api/v1/categories — full list of marketplace categories."""
@@ -52,6 +53,7 @@ async def list_categories(db: AsyncSession = Depends(get_db)):
     return result.scalars().all()
 
 
+#Настя
 @router.get("/products/feed", response_model=FeedResponse)
 async def product_feed(
     page: int = Query(1, ge=1),
@@ -76,7 +78,7 @@ async def product_feed(
     )
     return FeedResponse(feed_items=feed_items, total=total)
 
-
+#Марта
 @router.patch("/products/{product_id}/approve")
 async def approve_product_via_bot(
     product_id: int,
@@ -110,6 +112,7 @@ async def approve_product_via_bot(
         return {"ok": False, 'error': str(ex)}
 
 
+#Марта
 @router.patch("/products/{product_id}/reject")
 async def reject_product_via_bot(
     product_id: int,
@@ -156,7 +159,7 @@ async def reject_product_via_bot(
         return {"ok": False, "error": str(e)}
 
 
-
+#Марта
 @router.get("/products/{product_id}", response_model=ProductDetailResponse)
 async def product_detail(
     product_id: int,
@@ -214,6 +217,7 @@ async def product_detail(
     )
 
 
+#Матвій
 async def moderation_wrapper(product_id, title, price, image_urls, seller_id):
     # Використовуємо твій готовий get_redis()
     redis_conn = await get_redis()
@@ -231,6 +235,7 @@ _ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 _MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5 MB
 
 
+#Женя Ліщук
 @router.post("/products", status_code=201, response_model=ProductCreatedResponse)
 async def create_product(
     background_tasks: BackgroundTasks,
@@ -309,6 +314,7 @@ async def create_product(
     return ProductCreatedResponse(id=new_product.id, status=new_product.status)
 
 
+#Настя
 @router.get("/products_list/likes", response_model=ProductsListLikeResponse)
 async def products_like_list(
     user_id: uuid.UUID = Depends(get_current_user_id), 
@@ -360,6 +366,7 @@ async def products_like_list(
     return ProductsListLikeResponse(products=products_out)
 
 
+#Настя
 @router.post("/products/{product_id}/like", response_model=LikeResponse)
 async def toggle_like(
     product_id: int,

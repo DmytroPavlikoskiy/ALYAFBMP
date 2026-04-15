@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+#Матвій, Тимофій, Женя Л.
+
+
 @router.post("/decision")
 async def moderation_decision(
     body: ModerationDecisionBody,

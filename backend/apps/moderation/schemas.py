@@ -5,6 +5,9 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+#Матвій, Тимофій, Женя Л.
+
+
 class ModerationDecisionBody(BaseModel):
     product_id: int
     action: Literal["APPROVE", "REJECT"]

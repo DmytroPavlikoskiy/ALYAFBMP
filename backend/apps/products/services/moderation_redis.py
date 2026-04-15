@@ -8,6 +8,7 @@ from typing import Any
 
 from redis.asyncio import Redis
 
+#Тимофій, Женя, Матвій
 
 async def build_moderation_payload(
     product_id: int,

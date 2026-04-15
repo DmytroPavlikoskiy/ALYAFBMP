@@ -5,6 +5,8 @@ from passlib.context import CryptContext
 import re
 from config import settings
 
+#Сніжана, Ксенія, Юра
+
 # Налаштування (в ідеалі винести в .env / config)
 SECRET_KEY = settings.JWT_SECRET
 ALGORITHM = settings.ALGORITHM

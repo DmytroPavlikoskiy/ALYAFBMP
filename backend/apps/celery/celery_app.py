@@ -37,6 +37,7 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
 )
 
+#Марк .Б
 
 # ---------------------------------------------------------------------------
 # Task: clear expired bans (runs every 5 minutes via beat)

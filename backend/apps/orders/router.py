@@ -22,6 +22,7 @@ _TRANSITIONS: dict[str, set[str]] = {
     "CANCELLED": set(),
 }
 
+#Марк Кондрацький
 
 @router.post("/", status_code=201, response_model=OrderCreatedResponse)
 async def create_order(

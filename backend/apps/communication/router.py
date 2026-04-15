@@ -20,6 +20,7 @@ from common.models import Chat, Message, Product, User
 
 router = APIRouter()
 
+#Давид, Женя
 
 # ---------------------------------------------------------------------------
 # Schemas (inline — keep communication self-contained)

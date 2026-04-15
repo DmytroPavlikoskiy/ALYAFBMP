@@ -18,6 +18,8 @@ from fastapi import WebSocket
 
 logger = logging.getLogger(__name__)
 
+#Давид, Женя
+
 
 class ConnectionManager:
     def __init__(self) -> None:
