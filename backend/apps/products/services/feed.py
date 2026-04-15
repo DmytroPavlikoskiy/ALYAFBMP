@@ -8,7 +8,7 @@ from typing import Any
 import asyncio
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from backend.common.models import UserPreference, Product, User, Category, ProductImage
+from common.models import UserPreference, Product, User, Category, ProductImage
 from sqlalchemy import select, func, case, and_
 from sqlalchemy.orm import selectinload, joinedload
 
@@ -20,6 +20,9 @@ async def fetch_smart_feed(
     page: int,
     limit: int,
     category_id: int | None,
+    search: str | None = None,
+    min_price: float | None = None,
+    max_price: float | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     
     """ 
@@ -39,6 +42,12 @@ async def fetch_smart_feed(
     base_filter = Product.status.in_(["APPROVE", "ACTIVE"])
     if category_id:
         base_filter = and_(base_filter, Product.category_id == category_id)
+    if search:
+        base_filter = and_(base_filter, Product.title.ilike(f"%{search}%"))
+    if min_price is not None:
+        base_filter = and_(base_filter, Product.price >= min_price)
+    if max_price is not None:
+        base_filter = and_(base_filter, Product.price <= max_price)
 
     priority_col = case(
         (Product.category_id.in_(pref_user_cat_ids), 1),

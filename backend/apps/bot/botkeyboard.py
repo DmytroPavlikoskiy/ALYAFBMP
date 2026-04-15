@@ -1,8 +1,10 @@
 """
-Хендлери Telegram-бота (навчальний скелет).
-API: базовий URL має збігатися з FastAPI — див. API-contract.md (/api/v1/...).
+Telegram bot handlers: registration, login, main menu.
+API base URL must match FastAPI — see API-contract.md (/api/v1/...).
 """
-import json
+from __future__ import annotations
+
+import logging
 
 import httpx
 from aiogram import F, Router, types
@@ -10,29 +12,47 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import ReplyKeyboardRemove
 
+from apps.bot.bot_auth import delete_tokens, get_access_token, save_tokens
 from apps.bot.keyboards import get_menu_kb, get_sign_kb
 from apps.bot.state import User_Log, User_Reg
 from config import settings
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 _client = httpx.AsyncClient(base_url=settings.API_BASE_URL.rstrip("/"), timeout=30.0)
 
-# Тимчасове сховище профілів у пам'яті (у проді — Redis / БД)
-users: dict[int, dict] = {}
 
+# ---------------------------------------------------------------------------
+# /start
+# ---------------------------------------------------------------------------
 
 @router.message(CommandStart())
 async def main_handler(message: types.Message):
-    if message.from_user.id in users:
-        user_name = users[message.from_user.id].get("first_name", "")
-        await message.answer(f"👋 Вітаю знову, {user_name}!", reply_markup=await get_menu_kb())
-    else:
-        await message.answer(
-            "Привіт! Будь ласка, авторизуйтесь або зареєструйтесь.",
-            reply_markup=await get_sign_kb(),
-        )
+    token = await get_access_token(message.chat.id)
+    if token:
+        # Try to fetch user profile to confirm token is still valid
+        try:
+            resp = await _client.get(
+                "/api/v1/users/me",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            if resp.status_code == 200:
+                name = resp.json().get("first_name", "")
+                await message.answer(f"👋 Вітаю знову, {name}!", reply_markup=await get_menu_kb())
+                return
+        except Exception as exc:
+            logger.warning("Could not fetch /users/me: %s", exc)
 
+    await message.answer(
+        "Привіт! Будь ласка, авторизуйтесь або зареєструйтесь.",
+        reply_markup=await get_sign_kb(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Registration flow
+# ---------------------------------------------------------------------------
 
 @router.message(F.text == "📝 Реєстрація")
 async def reg_start(message: types.Message, state: FSMContext):
@@ -72,17 +92,33 @@ async def reg_email(message: types.Message, state: FSMContext):
 async def reg_password(message: types.Message, state: FSMContext):
     await state.update_data(password=message.text)
     data = await state.get_data()
-    # POST /api/v1/auth/register — тіло має відповідати схемі RegisterRequest
     payload = {**data, "tg_chat_id": message.chat.id}
-    response = await _client.post("/api/v1/auth/register", json=payload)
+
+    response = await _client.post(
+        "/api/v1/auth/register",
+        json=payload,
+        headers={"X-Bot-Secret": settings.BOT_SECRET},
+    )
 
     if response.status_code == 201:
-        # TODO студенти: зберегти access/refresh у Redis (ключ tg_chat_id)
-        await message.answer(f"✅ Реєстрація завершена, {data['first_name']}!", reply_markup=await get_menu_kb())
+        # Registration doesn't return tokens; ask the user to log in
+        await message.answer(
+            f"✅ Реєстрація завершена, {data['first_name']}!\n"
+            "Тепер увійдіть, щоб продовжити.",
+            reply_markup=await get_sign_kb(),
+        )
     else:
-        await message.answer(f"Помилка реєстрації: {response.text}")
+        try:
+            detail = response.json().get("detail", response.text)
+        except Exception:
+            detail = response.text
+        await message.answer(f"❌ Помилка реєстрації: {detail}")
     await state.clear()
 
+
+# ---------------------------------------------------------------------------
+# Login flow
+# ---------------------------------------------------------------------------
 
 @router.message(F.text == "🔑 Увійти")
 async def log_start(message: types.Message, state: FSMContext):
@@ -107,20 +143,101 @@ async def log_password(message: types.Message, state: FSMContext):
     }
     response = await _client.post("/api/v1/auth/login", json=payload)
 
-    # TODO студенти: розпарсити JSON, зберегти токени, показати ім'я з /users/me
-    found_user = None
     if response.status_code == 200:
-        try:
-            body = response.json()
-            found_user = {"first_name": "користувач", "raw": body}
-        except json.JSONDecodeError:
-            found_user = None
+        body = response.json()
+        access_token: str = body.get("access_token", "")
+        refresh_token: str = body.get("refresh_token", "")
 
-    if found_user:
+        await save_tokens(message.chat.id, access_token, refresh_token)
+
+        # Fetch real profile
+        first_name = "користувач"
+        try:
+            me_resp = await _client.get(
+                "/api/v1/users/me",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            if me_resp.status_code == 200:
+                first_name = me_resp.json().get("first_name", first_name)
+        except Exception as exc:
+            logger.warning("Could not fetch /users/me after login: %s", exc)
+
         await message.answer(
-            f"✅ Успішний вхід! (заглушка) {found_user['first_name']}",
+            f"✅ Вітаємо, {first_name}!",
             reply_markup=await get_menu_kb(),
         )
-        await state.clear()
     else:
-        await message.answer("❌ Невірний email або пароль. Спробуйте ще раз або введіть /start")
+        await message.answer(
+            "❌ Невірний email або пароль. Спробуйте ще раз або введіть /start"
+        )
+
+    await state.clear()
+
+
+# ---------------------------------------------------------------------------
+# Main menu handlers
+# ---------------------------------------------------------------------------
+
+@router.message(F.text == "🛒 Магазин")
+async def shop_handler(message: types.Message):
+    token = await get_access_token(message.chat.id)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    try:
+        resp = await _client.get("/api/v1/products/feed?limit=5", headers=headers)
+        if resp.status_code != 200:
+            await message.answer("Не вдалося завантажити товари. Спробуйте пізніше.")
+            return
+        items = resp.json().get("feed_items", [])
+        if not items:
+            await message.answer("Наразі товарів немає.")
+            return
+        lines = []
+        for item in items:
+            lines.append(f"• <b>{item['title']}</b> — {item['price']} грн  (ID: {item['id']})")
+        await message.answer(
+            "🛒 <b>Останні оголошення:</b>\n" + "\n".join(lines),
+            parse_mode="HTML",
+        )
+    except Exception as exc:
+        logger.exception("shop_handler error: %s", exc)
+        await message.answer("Помилка завантаження магазину.")
+
+
+@router.message(F.text == "⭐️ Вибране")
+async def favorites_handler(message: types.Message):
+    token = await get_access_token(message.chat.id)
+    if not token:
+        await message.answer("Будь ласка, увійдіть спочатку.", reply_markup=await get_sign_kb())
+        return
+    try:
+        resp = await _client.get(
+            "/api/v1/products_list/likes",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        if resp.status_code != 200:
+            await message.answer("Не вдалося завантажити вибране.")
+            return
+        products = resp.json().get("products", [])
+        if not products:
+            await message.answer("Ваш список вибраного порожній.")
+            return
+        lines = [
+            f"• <b>{p['product']['title']}</b> — {p['product']['price']} грн"
+            for p in products
+        ]
+        await message.answer(
+            "⭐️ <b>Ваше вибране:</b>\n" + "\n".join(lines),
+            parse_mode="HTML",
+        )
+    except Exception as exc:
+        logger.exception("favorites_handler error: %s", exc)
+        await message.answer("Помилка завантаження вибраного.")
+
+
+@router.message(F.text == "🚪 Вийти")
+async def logout_handler(message: types.Message):
+    await delete_tokens(message.chat.id)
+    await message.answer(
+        "До побачення! 👋 Ви вийшли з акаунту.",
+        reply_markup=await get_sign_kb(),
+    )

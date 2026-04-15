@@ -6,13 +6,14 @@
 """
 from __future__ import annotations
 
+import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pathlib import Path
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from apps.admin.admin_panel import mount_sqladmin
 from apps.auth.router import router as auth_router
@@ -37,19 +38,37 @@ async def lifespan(app: FastAPI):
     await close_redis()
 
 
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Attach a unique X-Request-ID to every request and response for tracing."""
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     debug=settings.DEBUG,
     lifespan=lifespan,
 )
 
+app.add_middleware(RequestIDMiddleware)
+
 STATIC_DIR = Path("static")
 STATIC_DIR.mkdir(parents=False, exist_ok=True)
 
+_cors_origins = settings.cors_origins_list
+# allow_credentials=True is incompatible with wildcard origins per the CORS spec.
+# When origins is ["*"] (dev default), disable credentials so browsers won't reject responses.
+_allow_credentials = "*" not in _cors_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins_list,
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

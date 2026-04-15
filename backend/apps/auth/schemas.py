@@ -21,11 +21,15 @@ class LoginRequest(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    access: str
-    refresh: str
+    access_token: str
+    refresh_token: str
     token_type: str
 
 
 class RegisterResponse(BaseModel):
     user_id: UUID = None
     status: str = None
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str

@@ -11,10 +11,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
+import logging
 
 import httpx
+import redis.asyncio as aioredis
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 
 from apps.bot.botkeyboard import router as user_flow_router
 from config import settings
@@ -22,6 +25,8 @@ from config import settings
 # =============================================================================
 # ЗАБОРОНЕНО в цьому пакеті: from common.database / from common.models / sqlalchemy
 # =============================================================================
+
+logger = logging.getLogger(__name__)
 
 
 def create_httpx_client() -> httpx.AsyncClient:
@@ -34,63 +39,102 @@ def create_httpx_client() -> httpx.AsyncClient:
 
 async def listen_to_redis_task(bot: Bot) -> None:
     """
-    Фонова задача: підписка на Redis і розсилка карток модерації адміну.
-
-    ПСЕВДОКОД (студенти реалізують; БД не чіпати):
-
-    1. Імпортувати redis.asyncio (окремо від проєктного common.redis — щоб не тягнути FastAPI-залежності, якщо не потрібно):
-       redis = Redis.from_url(settings.REDIS_URL, decode_responses=True).
-    2. pubsub = redis.pubsub(); await pubsub.subscribe("moderation_channel").
-    3. У циклі while True:
-         msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=30.0)
-         якщо msg is None або msg["type"] != "message": continue
-    4. data = json.loads(msg["data"])  # очікуй product_id, image_url (або images), title, price
-    5. НЕ викликати сесію БД. Використати лише product_id та URL зображення з повідомлення.
-    6. Побудувати InlineKeyboard: callback "mod:approve:{product_id}", "mod:reject:{product_id}"
-    7. await bot.send_message(chat_id=settings.ADMIN_ID, text=..., reply_markup=...)
-    8. Обробляти винятки, логувати.
-
-    Зараз: pass (порожня заглушка).
+    Фонова задача: підписка на Redis-канал moderation_channel і
+    розсилка карток модерації адміністратору через Telegram.
+    БД не використовується — лише дані з повідомлення Redis.
     """
-    pass
+    r = aioredis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
+    pubsub = r.pubsub()
+    await pubsub.subscribe("moderation_channel")
+    logger.info("Bot subscribed to moderation_channel")
+
+    while True:
+        try:
+            msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=30.0)
+
+            if msg is None or msg["type"] != "message":
+                await asyncio.sleep(0.1)
+                continue
+
+            data = json.loads(msg["data"])
+
+            product_id = data.get("product_id")
+            title = data.get("title", "—")
+            price = data.get("price", "—")
+            images: list[str] = data.get("images", [])
+            image_url = images[0] if images else None
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="✅ Схвалити",
+                        callback_data=f"mod:approve:{product_id}",
+                    ),
+                    InlineKeyboardButton(
+                        text="❌ Відхилити",
+                        callback_data=f"mod:reject:{product_id}",
+                    ),
+                ]
+            ])
+
+            caption = f"📦 <b>{title}</b>\n💰 Ціна: {price}\n🆔 ID: {product_id}"
+
+            if image_url:
+                await bot.send_photo(
+                    chat_id=settings.ADMIN_ID,
+                    photo=image_url,
+                    caption=caption,
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
+            else:
+                await bot.send_message(
+                    chat_id=settings.ADMIN_ID,
+                    text=caption,
+                    parse_mode="HTML",
+                    reply_markup=keyboard,
+                )
+
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            logger.exception("listen_to_redis_task error: %s", exc)
+            await asyncio.sleep(5)
+
+    await pubsub.unsubscribe("moderation_channel")
+    await r.aclose()
 
 
 async def approve_callback_handler(query: CallbackQuery) -> None:
-    """
-    Inline-кнопка «Схвалити».
-
-    ПСЕВДОКОД:
-
-    1. Виділити product_id з query.data після префікса "mod:approve:".
-    2. async with create_httpx_client() as client:
-    3. response = await client.patch(
-           f"/api/v1/products/{product_id}/approve",
-           headers={"X-Bot-Secret": settings.BOT_SECRET},
-       )
-    4. Якщо response.is_success: await query.answer("OK"); відредагувати повідомлення («Схвалено»).
-    5. Інакше: await query.answer("Помилка API", show_alert=True).
-
-    Зараз: pass.
-    """
-    pass
+    """Inline-кнопка «Схвалити» — PATCH /api/v1/products/{id}/approve."""
+    product_id = query.data.split(":")[-1]
+    async with create_httpx_client() as client:
+        response = await client.patch(
+            f"/api/v1/products/{product_id}/approve",
+            headers={"X-Bot-Secret": settings.BOT_SECRET},
+        )
+    if response.is_success:
+        await query.answer("Схвалено!")
+        await query.message.edit_caption(caption="✅ Статус: Схвалено", reply_markup=None)
+    else:
+        logger.error("approve failed: %s %s", response.status_code, response.text)
+        await query.answer("Помилка API", show_alert=True)
 
 
 async def reject_callback_handler(query: CallbackQuery) -> None:
-    """
-    Inline-кнопка «Відхилити».
-
-    ПСЕВДОКОД:
-
-    1. product_id з "mod:reject:".
-    2. await client.patch(
-           f"/api/v1/products/{product_id}/reject",
-           headers={"X-Bot-Secret": settings.BOT_SECRET},
-       )
-    3. Аналогічно оновити UI повідомлення в Telegram.
-
-    Зараз: pass.
-    """
-    pass
+    """Inline-кнопка «Відхилити» — PATCH /api/v1/products/{id}/reject."""
+    product_id = query.data.split(":")[-1]
+    async with create_httpx_client() as client:
+        response = await client.patch(
+            f"/api/v1/products/{product_id}/reject",
+            headers={"X-Bot-Secret": settings.BOT_SECRET},
+        )
+    if response.is_success:
+        await query.answer("Відхилено!")
+        await query.message.edit_caption(caption="❌ Статус: Відхилено", reply_markup=None)
+    else:
+        logger.error("reject failed: %s %s", response.status_code, response.text)
+        await query.answer("Помилка API", show_alert=True)
 
 
 def register_moderation_callbacks(dp: Dispatcher) -> None:

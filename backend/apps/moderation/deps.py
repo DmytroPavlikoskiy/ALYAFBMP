@@ -13,7 +13,7 @@ async def verify_bot_secret(x_bot_secret: str | None = Header(default=None, alia
 
 
 
-async def soft_verify_bot_secret(x_bot_secret: str | None = Header(default=False, alias="X-Bot_Secret")) -> bool:
+async def soft_verify_bot_secret(x_bot_secret: str | None = Header(default=None, alias="X-Bot-Secret")) -> bool:
     if x_bot_secret is None or x_bot_secret != settings.BOT_SECRET:
         return False
     return True

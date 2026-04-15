@@ -17,6 +17,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import UUID
@@ -131,9 +132,15 @@ class Wishlist(Base):
         ForeignKey("products.id", ondelete="CASCADE"), primary_key=True
     )
 
+    product: Mapped["Product"] = relationship()
+    user: Mapped["User"] = relationship()
+
 
 class Order(Base):
     __tablename__ = "orders"
+    __table_args__ = (
+        UniqueConstraint("buyer_id", "product_id", name="uq_order_buyer_product"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     buyer_id: Mapped[uuid.UUID] = mapped_column(
@@ -147,6 +154,9 @@ class Order(Base):
         DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP")
     )
 
+    product: Mapped["Product"] = relationship()
+    buyer: Mapped["User"] = relationship(foreign_keys="Order.buyer_id")
+
 
 class Notification(Base):
     __tablename__ = "notifications"
@@ -156,10 +166,10 @@ class Notification(Base):
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     text: Mapped[str] = mapped_column(Text, nullable=False)
-    type: Mapped[str] = mapped_column(String(20), server_default=text("'INFO'"))
-    is_read: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    type: Mapped[str] = mapped_column(String(20), server_default="'INFO'")
+    is_read: Mapped[bool] = mapped_column(Boolean, server_default="false")
     created_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP")
+        DateTime(timezone=True), server_default="CURRENT_TIMESTAMP"
     )
 
 
@@ -185,6 +195,10 @@ class Chat(Base):
         DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP")
     )
 
+    messages: Mapped[List["Message"]] = relationship(
+        back_populates="chat", cascade="all, delete-orphan"
+    )
+
 
 class Message(Base):
     __tablename__ = "messages"
@@ -198,5 +212,7 @@ class Message(Base):
     )
     text: Mapped[str] = mapped_column(Text, nullable=False)
     sent_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP")
+        DateTime(timezone=True), server_default="CURRENT_TIMESTAMP"
     )
+
+    chat: Mapped["Chat"] = relationship(back_populates="messages")

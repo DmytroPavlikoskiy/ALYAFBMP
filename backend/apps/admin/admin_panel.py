@@ -18,23 +18,22 @@ from config import settings
 # ---------------------------------------------------------------------------
 
 
-class UserAdmin(ModelView):
-    model = User
+class UserAdmin(ModelView, model=User):
     name = "Користувач"
     name_plural = "Користувачі"
     icon = "fa fa-user"
-    column_list = [User.id, User.email, User.first_name, User.role, User.created_at]
-    column_searchable_list = [User.email, User.first_name]
+    column_list = ["id", "email", "first_name", "role", "created_at"]
+    column_searchable_list = ["email", "first_name"]
     can_delete = False
     form_columns = [
-        User.email,
-        User.first_name,
-        User.last_name,
-        User.phone,
-        User.role,
-        User.tg_chat_id,
-        User.banned_until,
-        User.ban_reason,
+        "email",
+        "first_name",
+        "last_name",
+        "phone",
+        "role",
+        "tg_chat_id",
+        "banned_until",
+        "ban_reason",
     ]
 
 

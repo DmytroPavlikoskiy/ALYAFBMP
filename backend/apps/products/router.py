@@ -31,11 +31,12 @@ from apps.moderation.deps import verify_bot_secret
 from apps.products.services.feed import fetch_smart_feed
 from common.database import get_db
 from common.redis_client import get_redis
-from common.deps import get_current_user_id, get_current_user_id_optional
-from common.models import Product, User, Category, ProductImage
-from common.models import User
-from datetime import datetime, timezone, timedelta
-from apps.products.schemas import SellerOut, ProductDetailResponse
+from common.deps import get_current_user_id, get_current_user_id_optional, verify_user_not_banned
+from common.rate_limit import rate_limit
+from common.models import Product, User, Category, ProductImage, Wishlist
+from datetime import datetime, timezone
+from apps.products.schemas import (SellerOut, ProductDetailResponse,
+                                   ProductsListLikeResponse, ProductsListLike)
 from apps.products.services.moderation_redis import publish_new_product_to_moderation
 
 router = APIRouter()
@@ -46,13 +47,9 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 @router.get("/categories", response_model=list[CategoryOut])
 async def list_categories(db: AsyncSession = Depends(get_db)):
-    """
-    GET /api/v1/categories
-
-    1. Виконай select(Category) через await session.execute(select(Category).order_by(Category.id)).
-    2. Поверни список CategoryOut (id, name, icon_url).
-    """
-    raise HTTPException(status_code=501, detail="Група 2: реалізуйте список категорій (SQLAlchemy 2.0 select).")
+    """GET /api/v1/categories — full list of marketplace categories."""
+    result = await db.execute(select(Category).order_by(Category.id))
+    return result.scalars().all()
 
 
 @router.get("/products/feed", response_model=FeedResponse)
@@ -60,17 +57,22 @@ async def product_feed(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     category_id: int | None = Query(None),
+    search: str | None = Query(None, description="Full-text search in product title"),
+    min_price: float | None = Query(None, ge=0),
+    max_price: float | None = Query(None, ge=0),
     db: AsyncSession = Depends(get_db),
     user_id: uuid.UUID | None = Depends(get_current_user_id_optional),
 ):
-    """
-    GET /api/v1/products/feed
-
-    1. Виклич fetch_smart_feed(db, user_id=user_id, page=page, limit=limit, category_id=category_id).
-    2. Збери FeedResponse(items=..., total=...).
-    """
+    """GET /api/v1/products/feed — smart personalised feed with optional filters."""
     feed_items, total = await fetch_smart_feed(
-        db, user_id=user_id, page=page, limit=limit, category_id=category_id
+        db,
+        user_id=user_id,
+        page=page,
+        limit=limit,
+        category_id=category_id,
+        search=search,
+        min_price=min_price,
+        max_price=max_price,
     )
     return FeedResponse(feed_items=feed_items, total=total)
 
@@ -225,6 +227,10 @@ async def moderation_wrapper(product_id, title, price, image_urls, seller_id):
     )
 
 
+_ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+_MAX_IMAGE_SIZE = 5 * 1024 * 1024  # 5 MB
+
+
 @router.post("/products", status_code=201, response_model=ProductCreatedResponse)
 async def create_product(
     background_tasks: BackgroundTasks,
@@ -235,34 +241,16 @@ async def create_product(
     images: list[UploadFile] = File(default_factory=list),
     db: AsyncSession = Depends(get_db),
     user_id: uuid.UUID = Depends(get_current_user_id),
+    _ban: None = Depends(verify_user_not_banned),
+    _rl: None = Depends(rate_limit(max_requests=20, window_seconds=3600)),
 ):
     """
-    Створення оголошення з multipart/form-data (файли + поля форми).
-    Контракт також описує JSON з images як URL — можна додати окремий ендпоінт або прапорець пізніше.
+    POST /api/v1/products — create a new listing (multipart/form-data).
 
-    1. Перевір, що користувач не забанений: подивись User.banned_until (логіка в сервісі бану).
-    2. Створи Product(seller_id=user_id, title=..., price=..., status='PENDING', ...).
-    3. Для кожного UploadFile у images:
-       - прочитай байти: content = await file.read() (лише в цьому async-обробнику).
-       - збережи файл на диск: наприклад static/products/{product_id}_{safe_filename}.
-       - створи ProductImage(product_id=..., image_url=URL_або_шлях).
-    4. await session.commit(); отримай product.id.
-    5. У фонову задачу передай лише серіалізовані дані (id, title, price, список шляхів до зображень):
-       background_tasks.add_task(..., product_id, title, price, saved_paths, str(user_id)).
-    6. У функції фону виклич publish_new_product_to_moderation(await get_redis(), ...) або redis.publish.
-
-    ВАЖЛИВО: не передавай об'єкт UploadFile у BackgroundTasks.
-
-    Зараз: логіка не реалізована — піднімаємо 501, щоб студенти заповнили кроки.
+    Ban guard: verify_user_not_banned runs before this handler.  It reuses
+    the User object already fetched by get_current_user (zero extra DB query).
+    Only PENDING products are created here; approval happens via the bot.
     """
-    user = await db.get(User, user_id)
-    if user and user.banned_until:
-        if user.banned_until > datetime.now(timezone.utc):
-            raise HTTPException(
-                status_code=403,
-                detail=f"Ви забанені до {user.banned_until.strftime("%Y:%m:%d - %H:M")}"
-            )
-    
     new_product = Product(
         seller_id=user_id,
         title=title,
@@ -277,20 +265,35 @@ async def create_product(
     image_urls = []
 
     for file in images:
-        file_ext = Path(file.filename).suffix
+        # Validate MIME type
+        if file.content_type not in _ALLOWED_IMAGE_TYPES:
+            raise HTTPException(
+                status_code=415,
+                detail=f"Unsupported image type '{file.content_type}'. Allowed: JPEG, PNG, WebP.",
+            )
+
+        content = await file.read()
+
+        # Validate file size
+        if len(content) > _MAX_IMAGE_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Image '{file.filename}' exceeds 5 MB limit.",
+            )
+
+        file_ext = Path(file.filename).suffix.lower() if file.filename else ".jpg"
         safe_filename = f"{new_product.id}_{uuid.uuid4().hex}{file_ext}"
         file_path = UPLOAD_DIR / safe_filename
 
-        content = await file.read()
-        async with aiofiles.open(file_path, 'wb') as out_file:
+        async with aiofiles.open(file_path, "wb") as out_file:
             await out_file.write(content)
-        
-        relate_path  = str(f"{UPLOAD_DIR}/{safe_filename}")
+
+        relate_path = str(f"{UPLOAD_DIR}/{safe_filename}")
         image_urls.append(relate_path)
 
         new_image = ProductImage(
             product_id=new_product.id,
-            image_url=relate_path
+            image_url=relate_path,
         )
         db.add(new_image)
     
@@ -306,6 +309,56 @@ async def create_product(
     return ProductCreatedResponse(id=new_product.id, status=new_product.status)
 
 
+@router.get("/products_list/likes", response_model=ProductsListLikeResponse)
+async def products_like_list(
+    user_id: uuid.UUID = Depends(get_current_user_id), 
+    db: AsyncSession = Depends(get_db)
+):
+    # 1. Запит до БД: тягнемо Wishlist -> Product -> Seller
+    stmt = (
+        select(Wishlist)
+        .where(Wishlist.user_id == user_id)
+        .options(
+            joinedload(Wishlist.product).joinedload(Product.seller),
+            selectinload(Wishlist.product).selectinload(Product.images) # Якщо потрібні фото
+        )
+    )
+    
+    result = await db.execute(stmt)
+    # Отримуємо всі об'єкти Wishlist
+    wishlist_items = result.scalars().all()
+
+    products_out = []
+    for item in wishlist_items:
+        p = item.product
+        
+        # Створюємо SellerOut
+        seller_info = SellerOut(
+            id=p.seller.id,
+            full_name=f"{p.seller.first_name} {p.seller.last_name or ''}".strip(),
+            avatar_url=p.seller.avatar_url
+        )
+
+        # Створюємо ProductDetailResponse
+        product_detail = ProductDetailResponse(
+            id=p.id,
+            title=p.title,
+            description=p.description,
+            price=float(p.price),
+            seller=seller_info,
+            status=p.status
+        )
+
+        # Додаємо у фінальний список згідно з твоєю структурою ProductsListLike
+        products_out.append(
+            ProductsListLike(
+                product=product_detail,
+                is_like=True
+            )
+        )
+
+    return ProductsListLikeResponse(products=products_out)
+
 
 @router.post("/products/{product_id}/like", response_model=LikeResponse)
 async def toggle_like(
@@ -320,4 +373,28 @@ async def toggle_like(
     2. Якщо є — видали (toggle off), якщо немає — додай (toggle on).
     3. Поверни LikeResponse(is_liked=True/False).
     """
-    raise HTTPException(status_code=501, detail="Група 4: реалізуйте wishlist.")
+
+    check_query = select(Wishlist).where(
+        Wishlist.user_id == user_id,
+        Wishlist.product_id == product_id
+    )
+    result = await db.execute(check_query)
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        await db.delete(existing)
+        is_liked = False
+    else:
+        product_obj = await db.get(Product, product_id)
+        if not product_obj:
+            raise HTTPException(status_code=404, detail="Product not found")
+
+        new_wish = Wishlist(user_id=user_id, product_id=product_id)
+        db.add(new_wish)
+        is_liked = True
+    try:
+        await db.commit()
+        return LikeResponse(is_liked=is_liked)
+    except Exception:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail="Database error")
