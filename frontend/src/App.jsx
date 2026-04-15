@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import Navbar from './components/Navbar'
 import ProtectedRoute from './components/ProtectedRoute'
+import ErrorBoundary from './components/ErrorBoundary'
 
 import Feed          from './pages/Feed'
 import Login         from './pages/Login'
@@ -14,6 +15,7 @@ import ChatPage      from './pages/ChatPage'
 
 export default function App() {
   return (
+    <ErrorBoundary>
     <BrowserRouter>
       <AuthProvider>
         <div className="min-h-screen bg-gray-50">
@@ -52,5 +54,6 @@ export default function App() {
         </div>
       </AuthProvider>
     </BrowserRouter>
+    </ErrorBoundary>
   )
 }

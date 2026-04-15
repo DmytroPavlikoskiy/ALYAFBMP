@@ -26,8 +26,9 @@ export default function Feed() {
       if (maxPrice) params.max_price = maxPrice
       if (categoryId) params.category_id = categoryId
       const { data } = await api.get('/products/feed', { params })
-      setProducts(data.items ?? data)
-      setTotal(data.total ?? data.length)
+      // Backend returns { feed_items: [...], total: N }
+      setProducts(data.feed_items ?? [])
+      setTotal(data.total ?? 0)
     } catch {
       setProducts([])
     } finally {

@@ -1,6 +1,26 @@
 import { Link } from 'react-router-dom'
 import { Tag, Clock } from 'lucide-react'
 
+// Static files are served by the FastAPI backend, not the Vite dev server.
+const BACKEND = import.meta.env.VITE_API_BASE_URL
+  ? import.meta.env.VITE_API_BASE_URL.replace('/api/v1', '')
+  : 'http://localhost:8000'
+
+/**
+ * Resolve an image entry to an absolute URL.
+ * The feed returns images as plain path strings ("static/products/...").
+ * The detail endpoint may return objects with an image_url property.
+ */
+function resolveImageUrl(entry) {
+  if (!entry) return null
+  const raw = typeof entry === 'string' ? entry : entry.image_url
+  if (!raw) return null
+  // Already absolute (http/https/blob)
+  if (/^https?:\/\//.test(raw)) return raw
+  // Relative path — prepend backend origin
+  return `${BACKEND}/${raw.replace(/^\//, '')}`
+}
+
 const STATUS_STYLES = {
   APPROVE:  { label: 'Active',    cls: 'bg-green-100 text-green-700' },
   PENDING:  { label: 'Pending',   cls: 'bg-yellow-100 text-yellow-700' },
@@ -10,7 +30,7 @@ const STATUS_STYLES = {
 }
 
 export default function ProductCard({ product, showStatus = false }) {
-  const image = product.images?.[0]?.image_url ?? product.image_url ?? null
+  const image = resolveImageUrl(product.images?.[0]) ?? resolveImageUrl(product.image_url)
   const status = STATUS_STYLES[product.status] ?? STATUS_STYLES.PENDING
   const categoryName = product.category?.name ?? product.category_name ?? null
 
