@@ -3,6 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { Tag, User, ShoppingCart, MessageSquare, ChevronLeft, ChevronRight, AlertCircle } from 'lucide-react'
 import api from '../api/axios'
 import { useAuth } from '../context/AuthContext'
+import { resolveProductImageUrl } from '../utils/imageUrl'
 
 const STATUS_STYLES = {
   APPROVE:  { label: 'Available',  cls: 'bg-green-100 text-green-700' },
@@ -46,7 +47,8 @@ export default function ProductDetail() {
 
   if (!product) return null
 
-  const images = product.images ?? []
+  // API returns images as string[] (URLs/paths), not [{ image_url }]
+  const images = (product.images ?? []).map((entry) => resolveProductImageUrl(entry)).filter(Boolean)
   const status = STATUS_STYLES[product.status] ?? STATUS_STYLES.PENDING
   const isOwn = user?.id === product.seller?.id || user?.id === product.seller_id
   const canBuy = user && !isOwn && product.status === 'APPROVE'
@@ -91,7 +93,7 @@ export default function ProductDetail() {
           <div className="relative bg-gray-100 rounded-2xl overflow-hidden aspect-square">
             {images.length > 0 ? (
               <>
-                <img src={images[imgIndex]?.image_url} alt={product.title} className="w-full h-full object-cover" />
+                <img src={images[imgIndex]} alt={product.title} className="w-full h-full object-cover" />
                 {images.length > 1 && (
                   <>
                     <button onClick={() => setImgIndex((imgIndex - 1 + images.length) % images.length)}
@@ -114,10 +116,10 @@ export default function ProductDetail() {
           {/* Thumbnails */}
           {images.length > 1 && (
             <div className="flex gap-2 mt-2 overflow-x-auto pb-1">
-              {images.map((img, i) => (
+              {images.map((src, i) => (
                 <button key={i} onClick={() => setImgIndex(i)}
                   className={`w-14 h-14 rounded-lg overflow-hidden flex-shrink-0 border-2 transition-colors ${i === imgIndex ? 'border-blue-500' : 'border-transparent'}`}>
-                  <img src={img.image_url} alt="" className="w-full h-full object-cover" />
+                  <img src={src} alt="" className="w-full h-full object-cover" />
                 </button>
               ))}
             </div>

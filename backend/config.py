@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -39,14 +39,26 @@ class Settings(BaseSettings):
     )
 
     # --- Telegram (бот модерації та клієнтський бот) ---
+    # Never commit a real token. Set BOT_TOKEN in .env / .env_dev or container env.
     BOT_TOKEN: str = Field(
-        default="000000000:placeholder-replace-in-env",
+        default="0:invalid-placeholder-set-BOT_TOKEN-in-env",
         validation_alias=AliasChoices("BOT_TOKEN", "TG_BOT_TOKEN"),
         description="Токен BotFather; env може бути BOT_TOKEN або TG_BOT_TOKEN",
     )
+
+    @field_validator("BOT_TOKEN", mode="before")
+    @classmethod
+    def strip_bot_token(cls, v: object) -> object:
+        """Trim whitespace — .env files often accidentally include trailing newlines."""
+        if isinstance(v, str):
+            return v.strip()
+        return v
     ADMIN_ID: int = Field(
         default=0,
-        description="Telegram user id адміністратора (для розсилки карток модерації); 0 = не задано",
+        description=(
+            "Застаріле: розсилка модерації йде через GET /bot-internal/get_admins (role ADMIN + tg_chat_id). "
+            "Поле залишено для сумісності."
+        ),
     )
 
     # --- JWT (REST API) ---

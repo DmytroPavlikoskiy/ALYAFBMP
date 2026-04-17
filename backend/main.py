@@ -17,6 +17,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from apps.admin.admin_panel import mount_sqladmin
 from apps.auth.router import router as auth_router
+from apps.bot_internal.router import router as bot_internal_router
 from apps.communication.router import router as communication_router
 from apps.moderation.router import router as moderation_router
 from apps.orders.router import router as orders_router
@@ -86,6 +87,7 @@ app.include_router(users_router, prefix=f"{api_prefix}/users", tags=["users"])
 app.include_router(products_router, prefix=api_prefix, tags=["products"])
 app.include_router(orders_router, prefix=f"{api_prefix}/orders", tags=["orders"])
 app.include_router(moderation_router, prefix=f"{api_prefix}/moderation", tags=["moderation"])
+app.include_router(bot_internal_router, prefix=f"{api_prefix}/bot-internal", tags=["bot-internal"])
 app.include_router(communication_router, prefix=api_prefix, tags=["communication"])
 
 

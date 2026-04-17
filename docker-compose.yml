@@ -45,7 +45,11 @@ x-backend-common: &backend-common
     REFRESH_TOKEN_EXPIRE_DAYS: 7
 
     # ── Telegram Bot ───────────────────────────────────────────────────────
-    BOT_TOKEN: ${BOT_TOKEN:-}          # REQUIRED — set in .env
+    # Do NOT set BOT_TOKEN here with ${BOT_TOKEN:-} — an empty string in the
+    # container environment overrides pydantic's .env / .env_dev file values.
+    # Put BOT_TOKEN in backend/.env_dev (bind-mounted as /app/.env_dev) or set
+    # a non-empty BOT_TOKEN in the project-root .env and pass it explicitly below
+    # only when you need compose-level injection (optional bot override).
     BOT_SECRET: ${BOT_SECRET:-dev-bot-secret}
     TG_CHANNEL_ID: ${TG_CHANNEL_ID:-0}
     ADMIN_ID: ${ADMIN_ID:-0}
@@ -168,6 +172,9 @@ services:
   # The bot lives inside the backend codebase (apps/bot/bot.py) and makes
   # HTTP calls to the `backend` service via API_BASE_URL=http://backend:8000.
   # It does NOT import SQLAlchemy / common.database directly.
+  #
+  # Token: set BOT_TOKEN in backend/.env_dev (bind-mounted to /app/.env_dev).
+  # Do not use BOT_TOKEN: ${BOT_TOKEN:-} in compose — empty env overrides .env_dev.
   bot:
     <<: *backend-common
     command: python -m apps.bot.bot

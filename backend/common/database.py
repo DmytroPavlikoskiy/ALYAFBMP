@@ -1,28 +1,47 @@
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+
 from config import settings
 
-# 1. Створюємо асинхронний двигун (Engine)
-# Future=True дозволяє використовувати синтаксис SQLAlchemy 2.0
+# 1. Асинхронний двигун — FastAPI / uvicorn (один event loop на процес)
 engine = create_async_engine(
     settings.DATABASE_URL,
-    echo=settings.DEBUG,  # Логування SQL запитів у консоль (тільки в дебаг режимі)
-    future=True
+    echo=settings.DEBUG,
+    future=True,
+    pool_pre_ping=True,
 )
 
-# 2. Фабрика сесій
-# expire_on_commit=False потрібно для асинхронної роботи
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
     class_=AsyncSession,
-    expire_on_commit=False
+    expire_on_commit=False,
 )
 
-# 3. Базовий клас для всіх моделей (Групи будуть наслідуватися від нього)
+# 2. Синхронний двигун — Celery workers (prefork), скрипти, SQLAdmin
+# Async engine + asyncio.run() у форкнутому воркері дає змішані event loop / asyncpg
+# помилки («another operation is in progress», «different loop»).
+sync_engine = create_engine(
+    settings.sync_database_url,
+    pool_pre_ping=True,
+    pool_size=5,
+    max_overflow=10,
+    echo=settings.DEBUG,
+    future=True,
+)
+SyncSessionLocal = sessionmaker(
+    bind=sync_engine,
+    class_=Session,
+    autoflush=False,
+    autocommit=False,
+    expire_on_commit=False,
+)
+
+# 3. Базовий клас ORM
 class Base(DeclarativeBase):
     pass
 
-# 4. Depends метод для FastAPI роутерів
+# 4. Depends для FastAPI
 async def get_db():
     async with AsyncSessionLocal() as session:
         try:

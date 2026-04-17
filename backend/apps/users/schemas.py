@@ -13,6 +13,7 @@ class PreferencesBody(BaseModel):
 class UserMeResponse(BaseModel):
     id: UUID
     first_name: str
+    role: str
     is_banned: bool
     banned_until: datetime | None
     selected_categories: list[int]

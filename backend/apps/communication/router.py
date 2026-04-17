@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 
 from apps.communication.ws_manager import manager
-from common.database import get_db
+from common.database import AsyncSessionLocal, get_db
 from common.deps import get_current_user_id, get_user_id_from_ws_token
 from common.models import Chat, Message, Product, User
 
@@ -176,7 +176,6 @@ async def chat_websocket(
     websocket: WebSocket,
     chat_id: uuid.UUID,
     token: str = Query(...),
-    db: AsyncSession = Depends(get_db),
 ):
     """
     WS /api/v1/ws/chat/{chat_id}?token=<access_jwt>
@@ -184,17 +183,21 @@ async def chat_websocket(
     Authentication: JWT passed as query param.
     Authorization: only chat participants may connect.
     Persistence: every message is saved to the messages table.
-    """
-    try:
-        user_id = await get_user_id_from_ws_token(token, db)
-    except Exception:
-        await websocket.close(code=1008)
-        return
 
-    chat = await db.get(Chat, chat_id)
-    if not chat or user_id not in {chat.buyer_id, chat.seller_id}:
-        await websocket.close(code=1008)
-        return
+    Не використовуємо Depends(get_db) на весь час з’єднання — інакше одна сесія БД
+    «висить» на кожному відкритому WebSocket і вичерпує QueuePool.
+    """
+    async with AsyncSessionLocal() as db:
+        try:
+            user_id = await get_user_id_from_ws_token(token, db)
+        except Exception:
+            await websocket.close(code=1008)
+            return
+
+        chat = await db.get(Chat, chat_id)
+        if not chat or user_id not in {chat.buyer_id, chat.seller_id}:
+            await websocket.close(code=1008)
+            return
 
     await manager.connect(websocket, chat_id)
 
@@ -205,18 +208,21 @@ async def chat_websocket(
             if not text:
                 continue
 
-            msg = Message(chat_id=chat_id, sender_id=user_id, text_msg=text)
-            db.add(msg)
-            await db.commit()
-            await db.refresh(msg)
+            async with AsyncSessionLocal() as db:
+                msg = Message(chat_id=chat_id, sender_id=user_id, text_msg=text)
+                db.add(msg)
+                await db.commit()
+                await db.refresh(msg)
 
-            response = {
-                "id": msg.id,
-                "sender_id": str(user_id),
-                "text": text,
-                "sent_at": (msg.sent_at or datetime.now(timezone.utc)).isoformat(),
-            }
+                response = {
+                    "id": msg.id,
+                    "sender_id": str(user_id),
+                    "text": text,
+                    "sent_at": (msg.sent_at or datetime.now(timezone.utc)).isoformat(),
+                }
             await manager.broadcast(response, chat_id)
 
     except WebSocketDisconnect:
+        pass
+    finally:
         manager.disconnect(websocket, chat_id)

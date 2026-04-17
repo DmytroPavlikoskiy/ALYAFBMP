@@ -14,6 +14,7 @@ from aiogram.types import ReplyKeyboardRemove
 
 from apps.bot.bot_auth import delete_tokens, get_access_token, save_tokens
 from apps.bot.keyboards import get_menu_kb, get_sign_kb
+from apps.bot.moderation_cards import build_moderation_keyboard, send_moderation_card_to_chat
 from apps.bot.state import User_Log, User_Reg
 from config import settings
 
@@ -38,8 +39,13 @@ async def main_handler(message: types.Message):
                 headers={"Authorization": f"Bearer {token}"},
             )
             if resp.status_code == 200:
-                name = resp.json().get("first_name", "")
-                await message.answer(f"👋 Вітаю знову, {name}!", reply_markup=await get_menu_kb())
+                me = resp.json()
+                name = me.get("first_name", "")
+                is_admin = me.get("role") == "ADMIN"
+                await message.answer(
+                    f"👋 Вітаю знову, {name}!",
+                    reply_markup=await get_menu_kb(is_admin),
+                )
                 return
         except Exception as exc:
             logger.warning("Could not fetch /users/me: %s", exc)
@@ -152,19 +158,22 @@ async def log_password(message: types.Message, state: FSMContext):
 
         # Fetch real profile
         first_name = "користувач"
+        is_admin = False
         try:
             me_resp = await _client.get(
                 "/api/v1/users/me",
                 headers={"Authorization": f"Bearer {access_token}"},
             )
             if me_resp.status_code == 200:
-                first_name = me_resp.json().get("first_name", first_name)
+                mj = me_resp.json()
+                first_name = mj.get("first_name", first_name)
+                is_admin = mj.get("role") == "ADMIN"
         except Exception as exc:
             logger.warning("Could not fetch /users/me after login: %s", exc)
 
         await message.answer(
             f"✅ Вітаємо, {first_name}!",
-            reply_markup=await get_menu_kb(),
+            reply_markup=await get_menu_kb(is_admin),
         )
     else:
         await message.answer(
@@ -177,6 +186,65 @@ async def log_password(message: types.Message, state: FSMContext):
 # ---------------------------------------------------------------------------
 # Main menu handlers
 # ---------------------------------------------------------------------------
+
+@router.message(F.text == "📋 Черга модерації")
+async def moderation_queue_handler(message: types.Message):
+    """Список товарів PENDING (лише ADMIN)."""
+    token = await get_access_token(message.chat.id)
+    if not token:
+        await message.answer("Будь ласка, увійдіть спочатку.", reply_markup=await get_sign_kb())
+        return
+    me = await _client.get(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    if me.status_code != 200 or me.json().get("role") != "ADMIN":
+        await message.answer("⛔ Цей розділ доступний лише адміністраторам.")
+        return
+
+    resp = await _client.get(
+        "/api/v1/bot-internal/pending-products",
+        headers={"X-Bot-Secret": settings.BOT_SECRET},
+    )
+    if resp.status_code != 200:
+        await message.answer("Не вдалося завантажити чергу. Спробуйте пізніше.")
+        return
+    items = resp.json()
+    if not items:
+        await message.answer("✅ Немає товарів, що очікують модерації.")
+        return
+
+    await message.answer(
+        f"📋 <b>Черга модерації</b> (PENDING) — {len(items)} шт.\n"
+        "Нижче — картки з кнопками «Схвалити» / «Відхилити».",
+        parse_mode="HTML",
+    )
+
+    max_cards = 20
+    for p in items[:max_cards]:
+        pid = str(p["id"])
+        imgs = p.get("images") or []
+        image_url = imgs[0] if imgs else None
+        caption = (
+            f"📦 <b>{p['title']}</b>\n"
+            f"💰 Ціна: {p['price']}\n"
+            f"🆔 ID: {pid} · seller <code>{p['seller_id']}</code>"
+        )
+        keyboard = build_moderation_keyboard(pid)
+        await send_moderation_card_to_chat(
+            message.bot,
+            chat_id=message.chat.id,
+            caption=caption,
+            keyboard=keyboard,
+            image_url=image_url,
+        )
+
+    if len(items) > max_cards:
+        await message.answer(
+            f"… і ще {len(items) - max_cards} товар(ів). "
+            "Після обробки оновіть чергу або відкрийте список у веб-адмінці."
+        )
+
 
 @router.message(F.text == "🛒 Магазин")
 async def shop_handler(message: types.Message):

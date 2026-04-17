@@ -39,6 +39,7 @@ async def read_me(
     return UserMeResponse(
         id=user.id,
         first_name=user.first_name,
+        role=user.role,
         is_banned=is_banned,
         banned_until=user.banned_until,
         selected_categories=category_ids,

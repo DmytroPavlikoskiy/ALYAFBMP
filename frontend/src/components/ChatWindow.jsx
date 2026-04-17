@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Send, Wifi, WifiOff } from 'lucide-react'
-
-const WS_BASE = 'ws://localhost:8000/ws/chat'
+import { getChatWebSocketUrl } from '../utils/websocketUrl'
 
 export default function ChatWindow({ chatId, currentUserId, initialMessages = [] }) {
   const [messages, setMessages] = useState(initialMessages)
@@ -9,12 +8,25 @@ export default function ChatWindow({ chatId, currentUserId, initialMessages = []
   const [connected, setConnected] = useState(false)
   const wsRef = useRef(null)
   const bottomRef = useRef(null)
+  /** Якщо true — з’єднання закрили навмисно (unmount / заміна сокета), не плануємо reconnect. */
+  const intentionalCloseRef = useRef(false)
+  const reconnectTimerRef = useRef(null)
 
   const connect = useCallback(() => {
+    clearTimeout(reconnectTimerRef.current)
+    reconnectTimerRef.current = null
+
+    const prev = wsRef.current
+    if (prev) {
+      intentionalCloseRef.current = true
+      wsRef.current = null
+      prev.close()
+    }
+
     const token = localStorage.getItem('access_token')
     if (!token || !chatId) return
 
-    const ws = new WebSocket(`${WS_BASE}/${chatId}?token=${token}`)
+    const ws = new WebSocket(getChatWebSocketUrl(chatId, token))
     wsRef.current = ws
 
     ws.onopen = () => setConnected(true)
@@ -22,17 +34,23 @@ export default function ChatWindow({ chatId, currentUserId, initialMessages = []
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data)
-        setMessages((prev) => [...prev, msg])
+        setMessages((prev) => {
+          if (msg.id != null && prev.some((m) => m.id === msg.id)) return prev
+          return [...prev, msg]
+        })
       } catch {
-        // plain text fallback
         setMessages((prev) => [...prev, { text: event.data, sender_id: null, sent_at: new Date().toISOString() }])
       }
     }
 
     ws.onclose = () => {
       setConnected(false)
-      // reconnect after 3s
-      setTimeout(connect, 3000)
+      wsRef.current = null
+      if (intentionalCloseRef.current) {
+        intentionalCloseRef.current = false
+        return
+      }
+      reconnectTimerRef.current = setTimeout(() => connect(), 3000)
     }
 
     ws.onerror = () => ws.close()
@@ -41,9 +59,38 @@ export default function ChatWindow({ chatId, currentUserId, initialMessages = []
   useEffect(() => {
     connect()
     return () => {
-      wsRef.current?.close()
+      intentionalCloseRef.current = true
+      clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+      const w = wsRef.current
+      wsRef.current = null
+      w?.close()
     }
   }, [connect])
+
+  // Після refresh access_token (axios single-flight) — новий JWT у query, інакше WS лишається з простроченим токеном.
+  useEffect(() => {
+    const onAccessTokenChanged = () => connect()
+    window.addEventListener('auth:access-token-changed', onAccessTokenChanged)
+    return () => window.removeEventListener('auth:access-token-changed', onAccessTokenChanged)
+  }, [connect])
+
+  // Після повернення у вкладку перепідключитись, якщо сокет упав (сон вкладки, мережа).
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState !== 'visible' || !chatId) return
+      const w = wsRef.current
+      if (!w || w.readyState === WebSocket.CLOSED || w.readyState === WebSocket.CLOSING) {
+        connect()
+      }
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [connect, chatId])
+
+  useEffect(() => {
+    setMessages(initialMessages)
+  }, [chatId, initialMessages])
 
   // Scroll to bottom on new messages
   useEffect(() => {

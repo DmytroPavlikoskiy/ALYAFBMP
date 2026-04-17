@@ -31,13 +31,17 @@ from apps.moderation.deps import verify_bot_secret
 from apps.products.services.feed import fetch_smart_feed
 from common.database import get_db
 from common.redis_client import get_redis
+from common.redis_client import get_redis
 from common.deps import get_current_user_id, get_current_user_id_optional, verify_user_not_banned
 from common.rate_limit import rate_limit
 from common.models import Product, User, Category, ProductImage, Wishlist
 from datetime import datetime, timezone, timedelta
 from apps.products.schemas import (SellerOut, ProductDetailResponse,
                                    ProductsListLikeResponse, ProductsListLike)
-from apps.products.services.moderation_redis import publish_new_product_to_moderation
+from apps.products.services.moderation_redis import (
+    clear_moderation_delivery_tracking,
+    publish_new_product_to_moderation,
+)
 
 router = APIRouter()
 
@@ -105,6 +109,8 @@ async def approve_product_via_bot(
             now = datetime.now(timezone.utc)
             product.updated_at = now
             await db.commit()
+            redis_conn = await get_redis()
+            await clear_moderation_delivery_tracking(redis_conn, product_id)
             return {"ok": True}
     except Exception as ex:
         print(ex)
@@ -137,12 +143,16 @@ async def reject_product_via_bot(
         # 4. Пошук продавця (User)
         seller = await db.get(User, product.seller_id)
         if seller:
-            seller.is_banned = True  
+            seller.is_banned = True
             seller.banned_until = unban_date
+            seller.ban_reason = "Listing rejected by moderation (3-day posting restriction)"
 
         # 5. Збереження
         await db.commit()
-        
+
+        redis_conn = await get_redis()
+        await clear_moderation_delivery_tracking(redis_conn, product_id)
+
         # Освіжаємо об'єкт, щоб повернути актуальні дані
         await db.refresh(product)
 
@@ -219,7 +229,6 @@ async def product_detail(
 
 #Матвій
 async def moderation_wrapper(product_id, title, price, image_urls, seller_id):
-    # Використовуємо твій готовий get_redis()
     redis_conn = await get_redis()
     await publish_new_product_to_moderation(
         redis=redis_conn,
@@ -227,7 +236,7 @@ async def moderation_wrapper(product_id, title, price, image_urls, seller_id):
         title=title,
         price=price,
         image_urls=image_urls,
-        seller_id=seller_id
+        seller_id=str(seller_id),
     )
 
 
@@ -325,8 +334,10 @@ async def products_like_list(
         select(Wishlist)
         .where(Wishlist.user_id == user_id)
         .options(
-            joinedload(Wishlist.product).joinedload(Product.seller),
-            selectinload(Wishlist.product).selectinload(Product.images) # Якщо потрібні фото
+            selectinload(Wishlist.product).options(
+                joinedload(Product.seller),
+                selectinload(Product.images),
+            )
         )
     )
     
@@ -352,7 +363,8 @@ async def products_like_list(
             description=p.description,
             price=float(p.price),
             seller=seller_info,
-            status=p.status
+            status=p.status,
+            images=[img.image_url for img in (p.images or [])],
         )
 
         # Додаємо у фінальний список згідно з твоєю структурою ProductsListLike

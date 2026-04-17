@@ -56,4 +56,5 @@ async def test_users_me_authenticated(client: AsyncClient):
     assert resp.status_code == 200
     body = resp.json()
     assert body["first_name"] == "Prod"
+    assert "role" in body
     assert "is_banned" in body
